@@ -43,6 +43,10 @@ let skeletonBones = {};
 let initialHipsPos = new THREE.Vector3();
 let initialBoneRotations = {};
 
+// Rest-pose orientation for the hips (computed from bone world positions at load time)
+let q_hips_rest_world = new THREE.Quaternion();
+let q_hips_rest_local = new THREE.Quaternion();
+
 // Reference Skeleton (MediaPipe Raw Points)
 let mpSkeletonGroup = null;
 let mpJointSpheres = {};
@@ -73,72 +77,73 @@ const BONE_NAMES = [
 ];
 
 // MediaPipe to Mixamo Joint Mapping Configurations
-// defaultDir defines the direction vector of the bone in its local coordinate system when unrotated (quaternion is identity)
+// childBoneName points to the child joint in the skeleton hierarchy.
+// defaultDir will be dynamically computed at runtime based on child positions.
 const BONE_MAPPINGS = {
   'mixamorig2Spine': {
     parentKp: 'mid_hip',
     childKp: 'mid_shoulder',
-    defaultDir: new THREE.Vector3(0, 1, 0) // Points Up
+    childBoneName: 'mixamorig2Spine1'
   },
   'mixamorig2LeftShoulder': {
     parentKp: 'left_shoulder',
     childKp: 'left_shoulder',
-    defaultDir: new THREE.Vector3(1, 0, 0) // Points Left-to-Right (+X)
+    childBoneName: 'mixamorig2LeftArm'
   },
   'mixamorig2LeftArm': {
     parentKp: 'left_shoulder',
     childKp: 'left_elbow',
-    defaultDir: new THREE.Vector3(1, 0, 0) // Points Outwards (+X)
+    childBoneName: 'mixamorig2LeftForeArm'
   },
   'mixamorig2LeftForeArm': {
     parentKp: 'left_elbow',
     childKp: 'left_wrist',
-    defaultDir: new THREE.Vector3(1, 0, 0) // Points Outwards (+X)
+    childBoneName: 'mixamorig2LeftHand'
   },
   'mixamorig2LeftHand': {
     parentKp: 'left_wrist',
     childKp: 'left_index',
-    defaultDir: new THREE.Vector3(1, 0, 0) // Points Outwards (+X)
+    childBoneName: 'mixamorig2LeftHandIndex1'
   },
   'mixamorig2RightShoulder': {
     parentKp: 'right_shoulder',
     childKp: 'right_shoulder',
-    defaultDir: new THREE.Vector3(-1, 0, 0) // Points Right-to-Left (-X)
+    childBoneName: 'mixamorig2RightArm'
   },
   'mixamorig2RightArm': {
     parentKp: 'right_shoulder',
     childKp: 'right_elbow',
-    defaultDir: new THREE.Vector3(-1, 0, 0) // Points Outwards (-X)
+    childBoneName: 'mixamorig2RightForeArm'
   },
   'mixamorig2RightForeArm': {
     parentKp: 'right_elbow',
     childKp: 'right_wrist',
-    defaultDir: new THREE.Vector3(-1, 0, 0) // Points Outwards (-X)
+    childBoneName: 'mixamorig2RightHand'
   },
   'mixamorig2RightHand': {
     parentKp: 'right_wrist',
     childKp: 'right_index',
-    defaultDir: new THREE.Vector3(-1, 0, 0) // Points Outwards (-X)
+    childBoneName: 'mixamorig2RightHandIndex1'
   },
   'mixamorig2LeftUpLeg': {
     parentKp: 'left_hip',
     childKp: 'left_knee',
-    defaultDir: new THREE.Vector3(0, -1, 0) // Points Down (-Y)
+    childBoneName: 'mixamorig2LeftLeg'
   },
   'mixamorig2LeftLeg': {
     parentKp: 'left_knee',
     childKp: 'left_ankle',
-    defaultDir: new THREE.Vector3(0, -1, 0) // Points Down (-Y)
+    childBoneName: 'mixamorig2LeftFoot'
   },
   'mixamorig2RightUpLeg': {
     parentKp: 'right_hip',
     childKp: 'right_knee',
-    defaultDir: new THREE.Vector3(0, -1, 0) // Points Down (-Y)
+    childBoneName: 'mixamorig2RightLeg'
   },
   'mixamorig2RightLeg': {
     parentKp: 'right_knee',
     childKp: 'right_ankle',
-    defaultDir: new THREE.Vector3(0, -1, 0) // Points Down (-Y)
+    childBoneName: 'mixamorig2RightFoot'
   }
 };
 
@@ -316,21 +321,63 @@ function loadDancerModel() {
       dancerModel = gltf.scene;
       dancerModel.scale.set(0.01, 0.01, 0.01); // Scale model from centimeters to meters
       
-      // Scale and position adjustment if needed
+      // Apply materials and shadows to meshes
       dancerModel.traverse((node) => {
         if (node.isMesh) {
           node.castShadow = true;
           node.receiveShadow = true;
-          // Apply a material tweak to make it look premium
           if (node.material) {
             node.material.roughness = 0.4;
             node.material.metalness = 0.1;
           }
         }
+      });
+
+      // Find active skinned mesh skeleton to index bones.
+      // This protects against duplicate bone/dummy nodes in the model.
+      let skinnedMesh = null;
+      dancerModel.traverse((node) => {
+        if (node.isSkinnedMesh && !skinnedMesh) {
+          skinnedMesh = node;
+        }
+      });
+
+      if (skinnedMesh && skinnedMesh.skeleton) {
+        console.log("Skinning skeleton found. Indexing bones from:", skinnedMesh.name);
+        skinnedMesh.skeleton.bones.forEach((bone) => {
+          skeletonBones[bone.name] = bone;
+          initialBoneRotations[bone.name] = bone.rotation.clone();
+        });
+      } else {
+        console.warn("No active skinned mesh skeleton found. Fallback to full traversal.");
+        dancerModel.traverse((node) => {
+          if (node.isBone) {
+            if (!skeletonBones[node.name] || (node.children && node.children.length > 0)) {
+              skeletonBones[node.name] = node;
+              initialBoneRotations[node.name] = node.rotation.clone();
+            }
+          }
+        });
+      }
+
+      // Compute dynamic rest-pose directions (defaultDir) for each mapped joint
+      Object.keys(BONE_MAPPINGS).forEach(boneName => {
+        const mapping = BONE_MAPPINGS[boneName];
+        const bone = skeletonBones[boneName];
+        const childBone = skeletonBones[mapping.childBoneName];
         
-        if (node.isBone) {
-          skeletonBones[node.name] = node;
-          initialBoneRotations[node.name] = node.rotation.clone();
+        if (bone && childBone) {
+          mapping.defaultDir = childBone.position.clone().normalize();
+          console.log(`Dynamic defaultDir for ${boneName}:`, mapping.defaultDir);
+        } else {
+          // Fallbacks if child is not found
+          if (boneName.includes('Arm') || boneName.includes('Hand')) {
+            mapping.defaultDir = new THREE.Vector3(0, 1, 0); // arms point along Y
+          } else if (boneName.includes('Leg')) {
+            mapping.defaultDir = new THREE.Vector3(0, -1, 0); // legs point along -Y
+          } else {
+            mapping.defaultDir = new THREE.Vector3(0, 1, 0);
+          }
         }
       });
 
@@ -342,6 +389,34 @@ function loadDancerModel() {
 
       // Add to scene
       scene.add(dancerModel);
+      dancerModel.updateMatrixWorld(true);
+
+      // Compute rest-pose world orientation of hips from bone world positions.
+      // This avoids relying on matrixWorld.decompose() which can fail with reflections/negative scales.
+      {
+        const hipsWP = new THREE.Vector3();
+        const spineWP = new THREE.Vector3();
+        const lulWP = new THREE.Vector3();
+        const rulWP = new THREE.Vector3();
+        skeletonBones['mixamorig2Hips'].getWorldPosition(hipsWP);
+        skeletonBones['mixamorig2Spine'].getWorldPosition(spineWP);
+        skeletonBones['mixamorig2LeftUpLeg'].getWorldPosition(lulWP);
+        skeletonBones['mixamorig2RightUpLeg'].getWorldPosition(rulWP);
+
+        // Build an orthonormal basis from the model's rest-pose bone positions
+        let rv = new THREE.Vector3().subVectors(spineWP, hipsWP).normalize();   // vertical (up)
+        let rl = new THREE.Vector3().subVectors(rulWP, lulWP).normalize();       // lateral (character's left→right)
+        let rf = new THREE.Vector3().crossVectors(rl, rv).normalize();           // forward
+        rl.crossVectors(rv, rf).normalize(); // re-orthogonalize lateral
+
+        const restBasis = new THREE.Matrix4().makeBasis(rl, rv, rf);
+        q_hips_rest_world.setFromRotationMatrix(restBasis);
+        q_hips_rest_local.copy(skeletonBones['mixamorig2Hips'].quaternion);
+
+        console.log('Hips rest-pose: lateral=', rl, 'vertical=', rv, 'forward=', rf);
+        console.log('Hips rest-pose world quat:', q_hips_rest_world);
+        console.log('Hips rest-pose local quat:', q_hips_rest_local);
+      }
 
       // Create skeleton helper for visualization
       skeletonHelper = new THREE.SkeletonHelper(dancerModel);
@@ -492,29 +567,45 @@ function updatePose(frameIdx) {
   // 2. Update Hips (Root) Rotation & Position
   const hipsBone = skeletonBones['mixamorig2Hips'];
   if (hipsBone) {
-    // Rotation mapping for Hips:
-    // Left Hip - Right Hip defines the lateral axis (X)
-    const v_lateral = new THREE.Vector3().subVectors(left_hip, right_hip).normalize();
-    // Mid Hip to Mid Shoulder defines vertical spine (Y)
+    // Compute target body orientation in world space from MediaPipe keypoints
+    // Lateral: subject's left→right hip (positive X when facing camera)
+    const v_lateral = new THREE.Vector3().subVectors(right_hip, left_hip).normalize();
+    // Vertical: hips→shoulders (positive Y, upward)
     const v_vertical = new THREE.Vector3().subVectors(mid_shoulder, mid_hip).normalize();
-    // Forward Vector is cross product (Z)
+    // Forward: cross product of lateral and vertical (positive Z when facing camera)
     const v_forward = new THREE.Vector3().crossVectors(v_lateral, v_vertical).normalize();
-    
-    // Re-align lateral to make sure it is perfectly orthogonal
+    // Re-orthogonalize lateral
     v_lateral.crossVectors(v_vertical, v_forward).normalize();
     
-    // Set basis matrix
+    // Build target world quaternion from the orthonormal basis
     const basisMat = new THREE.Matrix4().makeBasis(v_lateral, v_vertical, v_forward);
-    const hipsQuat = new THREE.Quaternion().setFromRotationMatrix(basisMat);
+    const q_target_world = new THREE.Quaternion().setFromRotationMatrix(basisMat);
     
-    hipsBone.quaternion.copy(hipsQuat);
+    // Compute hips local rotation using rest-pose correction.
+    // Formula: q_new = q_rest_local * q_rest_world⁻¹ * q_target_world
+    //
+    // This approach:
+    // - Automatically handles any model facing direction (±Z, etc.)
+    // - Doesn't rely on matrixWorld.decompose() (which can be wrong with reflections)
+    // - Returns q_rest_local when target matches rest pose (correct identity behavior)
+    const q_rest_world_inv = q_hips_rest_world.clone().invert();
+    hipsBone.quaternion.copy(q_hips_rest_local)
+      .multiply(q_rest_world_inv)
+      .multiply(q_target_world);
     
-    // Set hips position: translate relative to its initial height, and scale MediaPipe hip movement.
-    // Convert meter-based MediaPipe offsets to centimeters (* 100) since model skeleton space is in cm.
+    // Position: translate hips based on MediaPipe hip center movement
     const posOffset = mid_hip.clone().multiplyScalar(positionScale);
-    // Limit translation slightly to keep dancer visually anchored
-    hipsBone.position.copy(initialHipsPos).add(new THREE.Vector3(posOffset.x * 100, posOffset.y * 50, posOffset.z * 80));
+    posOffset.x *= 1.0;
+    posOffset.y *= 0.5;
+    posOffset.z *= 0.8;
     
+    // Derive parent inverse rotation from rest-pose data (avoids decompose):
+    // q_parent = q_rest_world * q_rest_local⁻¹, so q_parent⁻¹ = q_rest_local * q_rest_world⁻¹
+    const q_parent_inv = q_hips_rest_local.clone().multiply(q_rest_world_inv);
+    const posOffsetLocal = posOffset.clone().applyQuaternion(q_parent_inv).multiplyScalar(100);
+    hipsBone.position.copy(initialHipsPos).add(posOffsetLocal);
+    
+    // Propagate matrix changes down the hierarchy
     hipsBone.updateMatrix();
     if (hipsBone.parent) {
       hipsBone.matrixWorld.multiplyMatrices(hipsBone.parent.matrixWorld, hipsBone.matrix);
