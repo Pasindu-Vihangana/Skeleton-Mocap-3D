@@ -348,17 +348,20 @@ function loadDancerModel() {
           skeletonBones[bone.name] = bone;
           initialBoneRotations[bone.name] = bone.rotation.clone();
         });
-      } else {
-        console.warn("No active skinned mesh skeleton found. Fallback to full traversal.");
-        dancerModel.traverse((node) => {
-          if (node.isBone) {
-            if (!skeletonBones[node.name] || (node.children && node.children.length > 0)) {
-              skeletonBones[node.name] = node;
-              initialBoneRotations[node.name] = node.rotation.clone();
-            }
-          }
-        });
       }
+
+      // Also traverse the full model hierarchy to find bones that exist in the
+      // scene graph but aren't bound to the skinned mesh (e.g. lower legs, feet, hands).
+      // These bones are still needed for animation even if they don't directly deform vertices.
+      dancerModel.traverse((node) => {
+        if (node.isBone && !skeletonBones[node.name]) {
+          skeletonBones[node.name] = node;
+          initialBoneRotations[node.name] = node.rotation.clone();
+          console.log('Found additional bone via traversal:', node.name);
+        }
+      });
+
+      console.log('Total bones indexed:', Object.keys(skeletonBones).length, Object.keys(skeletonBones));
 
       // Compute dynamic rest-pose directions (defaultDir) for each mapped joint
       Object.keys(BONE_MAPPINGS).forEach(boneName => {
@@ -518,12 +521,13 @@ function formatTime(seconds) {
   return `${m}:${s}`;
 }
 
-/* Coordinate Converter: MediaPipe (Flipped Y in python) to Three.js */
+/* Coordinate Converter: MediaPipe to Three.js model space */
 function getMPKeypoint(kp) {
   if (!kp) return new THREE.Vector3(0, 0, 0);
-  // MediaPipe x=left-to-right, y=up (due to python -y), z=depth (positive is away)
-  // Three.js right-handed: X is right, Y is up, Z is towards camera (so -z)
-  return new THREE.Vector3(kp.x, kp.y, -kp.z);
+  // MediaPipe world landmarks: +X = subject's right, +Y = up, +Z = away from camera
+  // Model convention:           +X = character's LEFT,  +Y = up, +Z = toward camera
+  // So we negate X (mirror left/right) and negate Z (flip depth direction)
+  return new THREE.Vector3(-kp.x, kp.y, -kp.z);
 }
 
 /* Compute Pose calculations and apply to Bones */
