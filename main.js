@@ -409,7 +409,7 @@ function loadDancerModel() {
         // Build an orthonormal basis from the model's rest-pose bone positions
         let rv = new THREE.Vector3().subVectors(spineWP, hipsWP).normalize();   // vertical (up)
         let rl = new THREE.Vector3().subVectors(rulWP, lulWP).normalize();       // lateral (character's left→right)
-        let rf = new THREE.Vector3().crossVectors(rl, rv).normalize();           // forward
+        let rf = new THREE.Vector3().crossVectors(rv, rl).normalize();           // forward = cross(vertical, lateral)
         rl.crossVectors(rv, rf).normalize(); // re-orthogonalize lateral
 
         const restBasis = new THREE.Matrix4().makeBasis(rl, rv, rf);
@@ -524,10 +524,10 @@ function formatTime(seconds) {
 /* Coordinate Converter: MediaPipe to Three.js model space */
 function getMPKeypoint(kp) {
   if (!kp) return new THREE.Vector3(0, 0, 0);
-  // MediaPipe world landmarks: +X = subject's right, +Y = up, +Z = away from camera
-  // Model convention:           +X = character's LEFT,  +Y = up, +Z = toward camera
-  // So we negate X (mirror left/right) and negate Z (flip depth direction)
-  return new THREE.Vector3(-kp.x, kp.y, -kp.z);
+  // MediaPipe world landmarks: +X = subject's right, +Y = up, +Z = toward camera
+  // Model convention:           +X = character's LEFT,  +Y = up, +Z = forward (toward camera)
+  // Only negate X (subject's right → character's left). Z convention already matches.
+  return new THREE.Vector3(-kp.x, kp.y, kp.z);
 }
 
 /* Compute Pose calculations and apply to Bones */
@@ -572,12 +572,12 @@ function updatePose(frameIdx) {
   const hipsBone = skeletonBones['mixamorig2Hips'];
   if (hipsBone) {
     // Compute target body orientation in world space from MediaPipe keypoints
-    // Lateral: subject's left→right hip (positive X when facing camera)
+    // Lateral: right_hip - left_hip (direction from character's left to right)
     const v_lateral = new THREE.Vector3().subVectors(right_hip, left_hip).normalize();
     // Vertical: hips→shoulders (positive Y, upward)
     const v_vertical = new THREE.Vector3().subVectors(mid_shoulder, mid_hip).normalize();
-    // Forward: cross product of lateral and vertical (positive Z when facing camera)
-    const v_forward = new THREE.Vector3().crossVectors(v_lateral, v_vertical).normalize();
+    // Forward: cross(vertical, lateral) — matches the model's +Z forward direction
+    const v_forward = new THREE.Vector3().crossVectors(v_vertical, v_lateral).normalize();
     // Re-orthogonalize lateral
     v_lateral.crossVectors(v_vertical, v_forward).normalize();
     

@@ -289,7 +289,7 @@
 
       const vertical = new THREE.Vector3().subVectors(spineWP, hipsWP).normalize();
       const lateral = new THREE.Vector3().subVectors(rulWP, lulWP).normalize();
-      const forward = new THREE.Vector3().crossVectors(lateral, vertical).normalize();
+      const forward = new THREE.Vector3().crossVectors(vertical, lateral).normalize();
 
       // Create arrow showing model's forward direction
       const arrowForward = new THREE.ArrowHelper(forward, hipsWP, 0.5, 0x00ff00, 0.05, 0.03);
@@ -427,9 +427,9 @@
 
     function getMPKeypoint(kp) {
       if (!kp) return null;
-      // Negate X to match model convention (model: character LEFT = +X, MediaPipe: subject RIGHT = +X)
-      // Negate Z to convert depth (MediaPipe +Z = away from camera → Three.js -Z)
-      return new THREE.Vector3(-kp.x, kp.y, -kp.z);
+      // Negate only X to match model convention (model: character LEFT = +X, MediaPipe: subject RIGHT = +X)
+      // Z convention already matches: both use +Z = toward camera / forward
+      return new THREE.Vector3(-kp.x, kp.y, kp.z);
     }
 
     function autoAlign() {
@@ -591,7 +591,7 @@
         lh.clone().multiplyScalar(kpScale).add(new THREE.Vector3(0, kpYOffset, 0))
       ).normalize();
       const vertical = new THREE.Vector3().subVectors(midShoulder, midHip).normalize();
-      const forward = new THREE.Vector3().crossVectors(lateral, vertical).normalize();
+      const forward = new THREE.Vector3().crossVectors(vertical, lateral).normalize();
 
       const arrowFwd = new THREE.ArrowHelper(forward, midHip, 0.4, 0xff0000, 0.05, 0.03);
       arrowFwd.name = 'kp-forward';
@@ -634,7 +634,7 @@
         const kpMidShoulder = ls.clone().add(rs).multiplyScalar(0.5);
         const kVert = new THREE.Vector3().subVectors(kpMidShoulder, kpMidHip).normalize();
         const kLat = new THREE.Vector3().subVectors(rh, lh).normalize();
-        const kFwd = new THREE.Vector3().crossVectors(kLat, kVert).normalize();
+        const kFwd = new THREE.Vector3().crossVectors(kVert, kLat).normalize();
 
         const dot = mFwd.dot(kFwd);
         const angleDeg = (Math.acos(Math.max(-1, Math.min(1, dot))) * 180 / Math.PI).toFixed(1);
