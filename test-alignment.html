@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Bone ↔ Keypoint Alignment Test</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #111; color: #eee; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+    #canvas-container { width: 100vw; height: 100vh; }
+    
+    #debug-panel {
+      position: fixed; top: 10px; right: 10px;
+      width: 380px; max-height: 90vh; overflow-y: auto;
+      background: rgba(0,0,0,0.85); border: 1px solid #333;
+      border-radius: 8px; padding: 12px; font-size: 12px;
+      z-index: 100;
+    }
+    #debug-panel h2 { font-size: 14px; margin-bottom: 8px; color: #0ff; }
+    #debug-panel h3 { font-size: 12px; margin: 10px 0 4px; color: #f0f; }
+    .joint-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 3px 6px; border-bottom: 1px solid #222; font-family: monospace; font-size: 11px;
+    }
+    .joint-row:hover { background: #222; }
+    .joint-name { color: #aaa; min-width: 110px; }
+    .pos-bone { color: #00ffcc; }
+    .pos-kp { color: #ff00ff; }
+    .pos-diff { color: #ffaa00; }
+    
+    #controls-panel {
+      position: fixed; top: 10px; left: 10px;
+      background: rgba(0,0,0,0.85); border: 1px solid #333;
+      border-radius: 8px; padding: 12px; z-index: 100;
+    }
+    #controls-panel label { display: block; margin: 4px 0; cursor: pointer; font-size: 13px; }
+    #controls-panel input[type="range"] { width: 180px; }
+    #controls-panel select, #controls-panel button {
+      margin: 4px 0; padding: 4px 8px; background: #222; border: 1px solid #555;
+      color: #eee; border-radius: 4px; cursor: pointer;
+    }
+    .legend { display: flex; gap: 16px; margin: 8px 0; font-size: 12px; }
+    .legend-item { display: flex; align-items: center; gap: 4px; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  </style>
+</head>
+<body>
+  <div id="canvas-container"></div>
+  
+  <div id="controls-panel">
+    <h2 style="color:#0ff; font-size:14px; margin-bottom:8px;">🔬 Alignment Test</h2>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-dot" style="background:#00ffcc"></span> Model Bones</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#ff00ff"></span> MediaPipe KP</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#ffaa00"></span> Offset Lines</div>
+    </div>
+    <hr style="border-color:#333; margin:8px 0">
+    <label><input type="checkbox" id="chk-model" checked> Show 3D Model Mesh</label>
+    <label><input type="checkbox" id="chk-skeleton" checked> Show Skeleton Helper</label>
+    <label><input type="checkbox" id="chk-bone-spheres" checked> Show Bone Joints (cyan)</label>
+    <label><input type="checkbox" id="chk-kp-spheres" checked> Show Keypoints (magenta)</label>
+    <label><input type="checkbox" id="chk-offset-lines" checked> Show Offset Lines</label>
+    <label><input type="checkbox" id="chk-labels" checked> Show Labels</label>
+    <label><input type="checkbox" id="chk-kp-skeleton" checked> Show KP Skeleton Lines</label>
+    <hr style="border-color:#333; margin:8px 0">
+    <label>Frame: <span id="frame-display">0</span>
+      <input type="range" id="frame-slider" min="0" max="0" value="0">
+    </label>
+    <label>KP Scale: <span id="scale-display">1.00</span>
+      <input type="range" id="scale-slider" min="0.5" max="5" step="0.01" value="1.00">
+    </label>
+    <label>KP Y Offset: <span id="yoffset-display">0.00</span>
+      <input type="range" id="yoffset-slider" min="-2" max="2" step="0.01" value="0.00">
+    </label>
+    <hr style="border-color:#333; margin:8px 0">
+    <button id="btn-reset-view">Reset Camera</button>
+    <button id="btn-dump">Dump Data to Console</button>
+    <label style="margin-top:6px"><input type="checkbox" id="chk-apply-pose"> Apply Pose to Model</label>
+  </div>
+  
+  <div id="debug-panel">
+    <h2>Joint Position Comparison</h2>
+    <div id="joint-table"></div>
+    <h3>Hierarchy Debug</h3>
+    <div id="hierarchy-info" style="font-family:monospace; font-size:10px; white-space:pre; color:#888;"></div>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "/node_modules/three/build/three.module.js",
+      "three/examples/jsm/": "/node_modules/three/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+    import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+
+    // --- Config ---
+    const JOINT_MAP = {
+      // MediaPipe KP name → Mixamo bone name (the bone at that joint)
+      'left_shoulder':  'mixamorig2LeftShoulder',
+      'right_shoulder': 'mixamorig2RightShoulder',
+      'left_elbow':     'mixamorig2LeftForeArm',
+      'right_elbow':    'mixamorig2RightForeArm',
+      'left_wrist':     'mixamorig2LeftHand',
+      'right_wrist':    'mixamorig2RightHand',
+      'left_hip':       'mixamorig2LeftUpLeg',
+      'right_hip':      'mixamorig2RightUpLeg',
+      'left_knee':      'mixamorig2LeftLeg',
+      'right_knee':     'mixamorig2RightLeg',
+      'left_ankle':     'mixamorig2LeftFoot',
+      'right_ankle':    'mixamorig2RightFoot',
+    };
+
+    // Additional bone positions to show (not directly mapped to KP)
+    const EXTRA_BONES = ['mixamorig2Hips', 'mixamorig2Spine', 'mixamorig2Spine1', 'mixamorig2Spine2',
+                         'mixamorig2Head', 'mixamorig2Neck',
+                         'mixamorig2LeftArm', 'mixamorig2RightArm',
+                         'mixamorig2LeftFoot', 'mixamorig2RightFoot'];
+
+    const KP_SKELETON_CONNECTIONS = [
+      ['left_shoulder', 'right_shoulder'],
+      ['left_shoulder', 'left_hip'],
+      ['right_shoulder', 'right_hip'],
+      ['left_hip', 'right_hip'],
+      ['left_shoulder', 'left_elbow'],
+      ['left_elbow', 'left_wrist'],
+      ['right_shoulder', 'right_elbow'],
+      ['right_elbow', 'right_wrist'],
+      ['left_hip', 'left_knee'],
+      ['left_knee', 'left_ankle'],
+      ['right_hip', 'right_knee'],
+      ['right_knee', 'right_ankle'],
+    ];
+
+    // --- State ---
+    let renderer, camera, scene, controls;
+    let dancerModel = null;
+    let skeletonHelper = null;
+    let skeletonBones = {};
+    let keypointData = null;
+    let currentFrame = 0;
+    let kpScale = 1.0;
+    let kpYOffset = 0.0;
+
+    // Visual groups
+    let boneSphereGroup, kpSphereGroup, offsetLineGroup, labelGroup, kpSkeletonGroup;
+    const boneSpheres = {};
+    const kpSpheres = {};
+    const labelSprites = {};
+
+    // --- Init ---
+    function init() {
+      const container = document.getElementById('canvas-container');
+      const w = container.clientWidth, h = container.clientHeight;
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(w, h);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      container.appendChild(renderer.domElement);
+
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x111118);
+
+      camera = new THREE.PerspectiveCamera(50, w / h, 0.01, 100);
+      camera.position.set(0, 1, 3);
+
+      controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.target.set(0, 0.8, 0);
+
+      // Lights
+      scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+      const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+      dir.position.set(3, 8, 5);
+      scene.add(dir);
+
+      // Grid
+      const grid = new THREE.GridHelper(10, 20, 0x00ffff, 0x111133);
+      grid.material.opacity = 0.3;
+      grid.material.transparent = true;
+      scene.add(grid);
+
+      // Axes helper
+      scene.add(new THREE.AxesHelper(0.5));
+
+      // Groups for toggleable visuals
+      boneSphereGroup = new THREE.Group();
+      kpSphereGroup = new THREE.Group();
+      offsetLineGroup = new THREE.Group();
+      labelGroup = new THREE.Group();
+      kpSkeletonGroup = new THREE.Group();
+      scene.add(boneSphereGroup);
+      scene.add(kpSphereGroup);
+      scene.add(offsetLineGroup);
+      scene.add(labelGroup);
+      scene.add(kpSkeletonGroup);
+
+      window.addEventListener('resize', () => {
+        const w2 = container.clientWidth, h2 = container.clientHeight;
+        camera.aspect = w2 / h2;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w2, h2);
+      });
+
+      loadModel();
+    }
+
+    function loadModel() {
+      const loader = new GLTFLoader();
+      loader.load('/dancer.glb', (gltf) => {
+        dancerModel = gltf.scene;
+        dancerModel.scale.set(0.01, 0.01, 0.01);
+
+        // Make mesh semi-transparent
+        dancerModel.traverse((node) => {
+          if (node.isMesh && node.material) {
+            node.material = node.material.clone();
+            node.material.transparent = true;
+            node.material.opacity = 0.35;
+            node.material.depthWrite = false;
+          }
+        });
+
+        // Index bones from skinned mesh
+        let skinnedMesh = null;
+        dancerModel.traverse(n => { if (n.isSkinnedMesh && !skinnedMesh) skinnedMesh = n; });
+
+        if (skinnedMesh && skinnedMesh.skeleton) {
+          skinnedMesh.skeleton.bones.forEach(b => { skeletonBones[b.name] = b; });
+        } else {
+          dancerModel.traverse(n => { if (n.isBone) skeletonBones[n.name] = n; });
+        }
+
+        scene.add(dancerModel);
+        dancerModel.updateMatrixWorld(true);
+
+        // Skeleton helper
+        skeletonHelper = new THREE.SkeletonHelper(dancerModel);
+        skeletonHelper.material.linewidth = 2;
+        scene.add(skeletonHelper);
+
+        // Log full bone hierarchy
+        logHierarchy();
+
+        // Create bone spheres
+        createBoneSpheres();
+
+        // Load keypoints
+        loadKeypoints();
+      });
+    }
+
+    function logHierarchy() {
+      const infoEl = document.getElementById('hierarchy-info');
+      let text = '';
+      
+      // Walk up from Hips to root
+      const hips = skeletonBones['mixamorig2Hips'];
+      if (hips) {
+        text += '=== Hips → Root Chain ===\n';
+        let node = hips;
+        while (node) {
+          const wp = new THREE.Vector3();
+          const wq = new THREE.Quaternion();
+          const ws = new THREE.Vector3();
+          node.matrixWorld.decompose(wp, wq, ws);
+          const euler = new THREE.Euler().setFromQuaternion(wq, 'XYZ');
+          text += `${node.name || '(unnamed)'} [${node.type}]\n`;
+          text += `  local pos: (${node.position.x.toFixed(1)}, ${node.position.y.toFixed(1)}, ${node.position.z.toFixed(1)})\n`;
+          text += `  local rot: (${(node.rotation.x*180/Math.PI).toFixed(1)}°, ${(node.rotation.y*180/Math.PI).toFixed(1)}°, ${(node.rotation.z*180/Math.PI).toFixed(1)}°)\n`;
+          text += `  local scl: (${node.scale.x.toFixed(4)}, ${node.scale.y.toFixed(4)}, ${node.scale.z.toFixed(4)})\n`;
+          text += `  world pos: (${wp.x.toFixed(4)}, ${wp.y.toFixed(4)}, ${wp.z.toFixed(4)})\n`;
+          text += `  world rot: (${(euler.x*180/Math.PI).toFixed(1)}°, ${(euler.y*180/Math.PI).toFixed(1)}°, ${(euler.z*180/Math.PI).toFixed(1)}°)\n`;
+          text += `  world scl: (${ws.x.toFixed(4)}, ${ws.y.toFixed(4)}, ${ws.z.toFixed(4)})\n\n`;
+          node = node.parent;
+        }
+
+        // Also log key bones' world positions
+        text += '\n=== Key Bone World Positions ===\n';
+        const keyBones = ['mixamorig2Hips', 'mixamorig2Spine', 'mixamorig2Spine1', 'mixamorig2Head',
+                          'mixamorig2LeftShoulder', 'mixamorig2RightShoulder',
+                          'mixamorig2LeftArm', 'mixamorig2RightArm',
+                          'mixamorig2LeftUpLeg', 'mixamorig2RightUpLeg',
+                          'mixamorig2LeftLeg', 'mixamorig2RightLeg',
+                          'mixamorig2LeftFoot', 'mixamorig2RightFoot'];
+        keyBones.forEach(name => {
+          const bone = skeletonBones[name];
+          if (bone) {
+            const wp = new THREE.Vector3();
+            bone.getWorldPosition(wp);
+            text += `${name}: (${wp.x.toFixed(4)}, ${wp.y.toFixed(4)}, ${wp.z.toFixed(4)})\n`;
+          }
+        });
+      }
+      
+      infoEl.textContent = text;
+      console.log(text);
+    }
+
+    function createBoneSpheres() {
+      const geo = new THREE.SphereGeometry(0.015, 12, 12);
+      const mat = new THREE.MeshBasicMaterial({ color: 0x00ffcc });
+
+      // Create spheres for mapped bones
+      Object.entries(JOINT_MAP).forEach(([kpName, boneName]) => {
+        const bone = skeletonBones[boneName];
+        if (bone) {
+          const sphere = new THREE.Mesh(geo, mat.clone());
+          boneSphereGroup.add(sphere);
+          boneSpheres[boneName] = sphere;
+        }
+      });
+
+      // Extra bones
+      const extraMat = new THREE.MeshBasicMaterial({ color: 0x00aa88 });
+      EXTRA_BONES.forEach(boneName => {
+        if (skeletonBones[boneName] && !boneSpheres[boneName]) {
+          const sphere = new THREE.Mesh(geo, extraMat.clone());
+          boneSphereGroup.add(sphere);
+          boneSpheres[boneName] = sphere;
+        }
+      });
+
+      updateBoneSpherePositions();
+    }
+
+    function updateBoneSpherePositions() {
+      Object.entries(boneSpheres).forEach(([boneName, sphere]) => {
+        const bone = skeletonBones[boneName];
+        if (bone) {
+          const wp = new THREE.Vector3();
+          bone.getWorldPosition(wp);
+          sphere.position.copy(wp);
+        }
+      });
+    }
+
+    function loadKeypoints() {
+      fetch('/dance_3d_keypoints.json')
+        .then(r => r.json())
+        .then(data => {
+          keypointData = data;
+          const totalFrames = data.total_frames || Object.keys(data.frames).length;
+          document.getElementById('frame-slider').max = totalFrames - 1;
+          createKPSpheres();
+          updateFrame(0);
+        })
+        .catch(err => console.error('Failed to load keypoints:', err));
+    }
+
+    function createKPSpheres() {
+      const geo = new THREE.SphereGeometry(0.02, 12, 12);
+      const mat = new THREE.MeshBasicMaterial({ color: 0xff00ff });
+
+      Object.keys(JOINT_MAP).forEach(kpName => {
+        const sphere = new THREE.Mesh(geo, mat.clone());
+        kpSphereGroup.add(sphere);
+        kpSpheres[kpName] = sphere;
+      });
+
+      // Also add mid_hip and mid_shoulder as reference
+      ['mid_hip', 'mid_shoulder'].forEach(name => {
+        const sphere = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xff8800 }));
+        kpSphereGroup.add(sphere);
+        kpSpheres[name] = sphere;
+      });
+    }
+
+    function getMPKeypoint(kp) {
+      if (!kp) return null;
+      return new THREE.Vector3(kp.x, kp.y, -kp.z);
+    }
+
+    function updateFrame(frameIdx) {
+      if (!keypointData) return;
+      currentFrame = frameIdx;
+
+      const frame = keypointData.frames[frameIdx.toString()];
+      if (!frame) return;
+      const kps = frame.keypoints_3d;
+
+      // Update keypoint sphere positions
+      Object.keys(kpSpheres).forEach(kpName => {
+        let kp;
+        if (kpName === 'mid_hip') {
+          const lh = getMPKeypoint(kps['left_hip']);
+          const rh = getMPKeypoint(kps['right_hip']);
+          if (lh && rh) kp = lh.add(rh).multiplyScalar(0.5);
+        } else if (kpName === 'mid_shoulder') {
+          const ls = getMPKeypoint(kps['left_shoulder']);
+          const rs = getMPKeypoint(kps['right_shoulder']);
+          if (ls && rs) kp = ls.add(rs).multiplyScalar(0.5);
+        } else {
+          kp = getMPKeypoint(kps[kpName]);
+        }
+        
+        if (kp) {
+          kp.multiplyScalar(kpScale);
+          kp.y += kpYOffset;
+          kpSpheres[kpName].position.copy(kp);
+          kpSpheres[kpName].visible = true;
+        } else {
+          kpSpheres[kpName].visible = false;
+        }
+      });
+
+      // Update KP skeleton lines
+      kpSkeletonGroup.clear();
+      const lineMat = new THREE.LineBasicMaterial({ color: 0xff00ff, transparent: true, opacity: 0.5 });
+      KP_SKELETON_CONNECTIONS.forEach(([a, b]) => {
+        const sa = kpSpheres[a], sb = kpSpheres[b];
+        if (sa && sb && sa.visible && sb.visible) {
+          const geo = new THREE.BufferGeometry().setFromPoints([sa.position, sb.position]);
+          kpSkeletonGroup.add(new THREE.Line(geo, lineMat));
+        }
+      });
+
+      // Update offset lines (bone ↔ keypoint)
+      offsetLineGroup.clear();
+      const offsetMat = new THREE.LineBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.6 });
+      Object.entries(JOINT_MAP).forEach(([kpName, boneName]) => {
+        const boneSphere = boneSpheres[boneName];
+        const kpSphere = kpSpheres[kpName];
+        if (boneSphere && kpSphere && kpSphere.visible) {
+          const geo = new THREE.BufferGeometry().setFromPoints([boneSphere.position, kpSphere.position]);
+          offsetLineGroup.add(new THREE.Line(geo, offsetMat));
+        }
+      });
+
+      // Update labels
+      labelGroup.clear();
+      if (document.getElementById('chk-labels').checked) {
+        Object.entries(JOINT_MAP).forEach(([kpName, boneName]) => {
+          const kpSphere = kpSpheres[kpName];
+          if (kpSphere && kpSphere.visible) {
+            const label = makeTextSprite(kpName, '#ff00ff');
+            label.position.copy(kpSphere.position);
+            label.position.y += 0.04;
+            labelGroup.add(label);
+          }
+          const boneSphere = boneSpheres[boneName];
+          if (boneSphere) {
+            const label = makeTextSprite(boneName.replace('mixamorig2', ''), '#00ffcc');
+            label.position.copy(boneSphere.position);
+            label.position.y -= 0.04;
+            labelGroup.add(label);
+          }
+        });
+      }
+
+      // Update debug table
+      updateDebugTable(kps);
+    }
+
+    function updateDebugTable(kps) {
+      const table = document.getElementById('joint-table');
+      let html = '';
+      
+      Object.entries(JOINT_MAP).forEach(([kpName, boneName]) => {
+        const bone = skeletonBones[boneName];
+        const kpRaw = kps[kpName];
+        
+        if (bone && kpRaw) {
+          const boneWP = new THREE.Vector3();
+          bone.getWorldPosition(boneWP);
+          
+          const kpPos = getMPKeypoint(kpRaw);
+          kpPos.multiplyScalar(kpScale);
+          kpPos.y += kpYOffset;
+          
+          const dist = boneWP.distanceTo(kpPos);
+          
+          html += `<div class="joint-row">
+            <span class="joint-name">${kpName}</span>
+            <span class="pos-bone" title="Bone world pos">(${boneWP.x.toFixed(3)}, ${boneWP.y.toFixed(3)}, ${boneWP.z.toFixed(3)})</span>
+            <span class="pos-kp" title="KP pos">(${kpPos.x.toFixed(3)}, ${kpPos.y.toFixed(3)}, ${kpPos.z.toFixed(3)})</span>
+            <span class="pos-diff" title="Distance">${dist.toFixed(3)}</span>
+          </div>`;
+        }
+      });
+      
+      table.innerHTML = html;
+    }
+
+    function makeTextSprite(text, color) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      ctx.font = 'bold 24px monospace';
+      ctx.fillStyle = color;
+      ctx.textAlign = 'center';
+      ctx.fillText(text, 128, 40);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
+      const sprite = new THREE.Sprite(mat);
+      sprite.scale.set(0.2, 0.05, 1);
+      return sprite;
+    }
+
+    // --- UI Controls ---
+    function setupUI() {
+      document.getElementById('chk-model').addEventListener('change', e => {
+        if (dancerModel) dancerModel.visible = e.target.checked;
+      });
+      document.getElementById('chk-skeleton').addEventListener('change', e => {
+        if (skeletonHelper) skeletonHelper.visible = e.target.checked;
+      });
+      document.getElementById('chk-bone-spheres').addEventListener('change', e => {
+        boneSphereGroup.visible = e.target.checked;
+      });
+      document.getElementById('chk-kp-spheres').addEventListener('change', e => {
+        kpSphereGroup.visible = e.target.checked;
+      });
+      document.getElementById('chk-offset-lines').addEventListener('change', e => {
+        offsetLineGroup.visible = e.target.checked;
+      });
+      document.getElementById('chk-labels').addEventListener('change', () => {
+        updateFrame(currentFrame);
+      });
+      document.getElementById('chk-kp-skeleton').addEventListener('change', e => {
+        kpSkeletonGroup.visible = e.target.checked;
+      });
+
+      document.getElementById('frame-slider').addEventListener('input', e => {
+        const f = parseInt(e.target.value);
+        document.getElementById('frame-display').textContent = f;
+        updateFrame(f);
+      });
+
+      document.getElementById('scale-slider').addEventListener('input', e => {
+        kpScale = parseFloat(e.target.value);
+        document.getElementById('scale-display').textContent = kpScale.toFixed(2);
+        updateFrame(currentFrame);
+      });
+
+      document.getElementById('yoffset-slider').addEventListener('input', e => {
+        kpYOffset = parseFloat(e.target.value);
+        document.getElementById('yoffset-display').textContent = kpYOffset.toFixed(2);
+        updateFrame(currentFrame);
+      });
+
+      document.getElementById('btn-reset-view').addEventListener('click', () => {
+        camera.position.set(0, 1, 3);
+        controls.target.set(0, 0.8, 0);
+      });
+
+      document.getElementById('btn-dump').addEventListener('click', () => {
+        console.log('=== FULL DUMP ===');
+        console.log('Skeleton Bones:', Object.keys(skeletonBones));
+        Object.entries(skeletonBones).forEach(([name, bone]) => {
+          const wp = new THREE.Vector3();
+          bone.getWorldPosition(wp);
+          console.log(`${name}: worldPos=(${wp.x.toFixed(4)}, ${wp.y.toFixed(4)}, ${wp.z.toFixed(4)}), localPos=(${bone.position.x.toFixed(2)}, ${bone.position.y.toFixed(2)}, ${bone.position.z.toFixed(2)}), localRot=(${(bone.rotation.x*180/Math.PI).toFixed(1)}°, ${(bone.rotation.y*180/Math.PI).toFixed(1)}°, ${(bone.rotation.z*180/Math.PI).toFixed(1)}°)`);
+        });
+        
+        if (keypointData) {
+          const frame = keypointData.frames['0'];
+          if (frame) {
+            console.log('\n=== Frame 0 Keypoints (raw JSON) ===');
+            Object.entries(frame.keypoints_3d).forEach(([name, kp]) => {
+              console.log(`${name}: x=${kp.x.toFixed(4)}, y=${kp.y.toFixed(4)}, z=${kp.z.toFixed(4)}`);
+            });
+            console.log('\n=== Frame 0 Keypoints (Three.js converted) ===');
+            Object.entries(frame.keypoints_3d).forEach(([name, kp]) => {
+              const v = getMPKeypoint(kp);
+              console.log(`${name}: x=${v.x.toFixed(4)}, y=${v.y.toFixed(4)}, z=${v.z.toFixed(4)}`);
+            });
+          }
+        }
+      });
+    }
+
+    // --- Render Loop ---
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      
+      // Update bone sphere positions (in case model is animated)
+      updateBoneSpherePositions();
+      
+      renderer.render(scene, camera);
+    }
+
+    // --- Start ---
+    init();
+    setupUI();
+    animate();
+  </script>
+</body>
+</html>
