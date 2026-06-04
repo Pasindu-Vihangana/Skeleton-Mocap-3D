@@ -42,6 +42,9 @@ let skeletonHelper = null;
 let skeletonBones = {};
 let initialHipsPos = new THREE.Vector3();
 let initialBoneRotations = {};
+let initialBoneQuaternions = {};
+let allBonesSorted = [];
+let firstFrameMidHip = null;
 
 // Rest-pose orientation for the hips (computed from bone world positions at load time)
 let q_hips_rest_world = new THREE.Quaternion();
@@ -347,6 +350,7 @@ function loadDancerModel() {
         skinnedMesh.skeleton.bones.forEach((bone) => {
           skeletonBones[bone.name] = bone;
           initialBoneRotations[bone.name] = bone.rotation.clone();
+          initialBoneQuaternions[bone.name] = bone.quaternion.clone();
         });
       }
 
@@ -357,32 +361,24 @@ function loadDancerModel() {
         if (node.isBone && !skeletonBones[node.name]) {
           skeletonBones[node.name] = node;
           initialBoneRotations[node.name] = node.rotation.clone();
+          initialBoneQuaternions[node.name] = node.quaternion.clone();
           console.log('Found additional bone via traversal:', node.name);
         }
       });
 
       console.log('Total bones indexed:', Object.keys(skeletonBones).length, Object.keys(skeletonBones));
 
-      // Compute dynamic rest-pose directions (defaultDir) for each mapped joint
-      Object.keys(BONE_MAPPINGS).forEach(boneName => {
-        const mapping = BONE_MAPPINGS[boneName];
-        const bone = skeletonBones[boneName];
-        const childBone = skeletonBones[mapping.childBoneName];
-        
-        if (bone && childBone) {
-          mapping.defaultDir = childBone.position.clone().normalize();
-          console.log(`Dynamic defaultDir for ${boneName}:`, mapping.defaultDir);
-        } else {
-          // Fallbacks if child is not found
-          if (boneName.includes('Arm') || boneName.includes('Hand')) {
-            mapping.defaultDir = new THREE.Vector3(0, 1, 0); // arms point along Y
-          } else if (boneName.includes('Leg')) {
-            mapping.defaultDir = new THREE.Vector3(0, -1, 0); // legs point along -Y
-          } else {
-            mapping.defaultDir = new THREE.Vector3(0, 1, 0);
-          }
+      // Depth-sort skeleton bones
+      function getBoneDepth(bone) {
+        let depth = 0;
+        let p = bone.parent;
+        while (p) {
+          depth++;
+          p = p.parent;
         }
-      });
+        return depth;
+      }
+      allBonesSorted = Object.values(skeletonBones).sort((a, b) => getBoneDepth(a) - getBoneDepth(b));
 
       // Find hips and save initial state
       const hips = skeletonBones['mixamorig2Hips'];
@@ -393,6 +389,36 @@ function loadDancerModel() {
       // Add to scene
       scene.add(dancerModel);
       dancerModel.updateMatrixWorld(true);
+
+      // Compute dynamic rest-pose directions (restDirWorld) and world rotations (restQuatWorld) for mapped joints
+      Object.keys(BONE_MAPPINGS).forEach(boneName => {
+        const mapping = BONE_MAPPINGS[boneName];
+        const bone = skeletonBones[boneName];
+        const childBone = skeletonBones[mapping.childBoneName];
+        
+        if (bone && childBone) {
+          const boneWP = new THREE.Vector3();
+          const childWP = new THREE.Vector3();
+          bone.getWorldPosition(boneWP);
+          childBone.getWorldPosition(childWP);
+          
+          mapping.restDirWorld = new THREE.Vector3().subVectors(childWP, boneWP).normalize();
+          mapping.restQuatWorld = new THREE.Quaternion();
+          bone.getWorldQuaternion(mapping.restQuatWorld);
+          
+          console.log(`Rest pose computed for ${boneName}: restDirWorld=`, mapping.restDirWorld);
+        } else {
+          // Fallbacks if child is not found
+          let defaultDir = new THREE.Vector3(0, 1, 0);
+          if (boneName.includes('Arm') || boneName.includes('Hand')) {
+            defaultDir = new THREE.Vector3(0, 1, 0);
+          } else if (boneName.includes('Leg')) {
+            defaultDir = new THREE.Vector3(0, -1, 0);
+          }
+          mapping.restDirWorld = defaultDir.clone().applyQuaternion(bone.quaternion).normalize();
+          mapping.restQuatWorld = bone.quaternion.clone();
+        }
+      });
 
       // Compute rest-pose world orientation of hips from bone world positions.
       // This avoids relying on matrixWorld.decompose() which can fail with reflections/negative scales.
@@ -468,6 +494,15 @@ function loadKeypoints() {
       systemStatusEl.classList.add('ready');
       videoOverlayStatus.textContent = `${totalFrames} frames loaded`;
       
+      // Compute first frame's mid-hip keypoint for relative tracking
+      const firstFrame = data.frames['0'] || data.frames[Object.keys(data.frames)[0]];
+      if (firstFrame && firstFrame.keypoints_3d) {
+        const lh = getMPKeypoint(firstFrame.keypoints_3d['left_hip']);
+        const rh = getMPKeypoint(firstFrame.keypoints_3d['right_hip']);
+        firstFrameMidHip = new THREE.Vector3().addVectors(lh, rh).multiplyScalar(0.5);
+        console.log('Successfully initialized firstFrameMidHip:', firstFrameMidHip);
+      }
+
       // Build Telemetry Card List in DOM
       buildTelemetryUI();
       
@@ -586,25 +621,19 @@ function updatePose(frameIdx) {
     const q_target_world = new THREE.Quaternion().setFromRotationMatrix(basisMat);
     
     // Compute hips local rotation using rest-pose correction.
-    // Formula: q_new = q_rest_local * q_rest_world⁻¹ * q_target_world
-    //
-    // This approach:
-    // - Automatically handles any model facing direction (±Z, etc.)
-    // - Doesn't rely on matrixWorld.decompose() (which can be wrong with reflections)
-    // - Returns q_rest_local when target matches rest pose (correct identity behavior)
     const q_rest_world_inv = q_hips_rest_world.clone().invert();
     hipsBone.quaternion.copy(q_hips_rest_local)
       .multiply(q_rest_world_inv)
       .multiply(q_target_world);
     
-    // Position: translate hips based on MediaPipe hip center movement
-    const posOffset = mid_hip.clone().multiplyScalar(positionScale);
+    // Position: translate hips based on relative MediaPipe hip center movement
+    const baseMidHip = firstFrameMidHip || mid_hip;
+    const posOffset = new THREE.Vector3().subVectors(mid_hip, baseMidHip).multiplyScalar(positionScale);
     posOffset.x *= 1.0;
-    posOffset.y *= 0.5;
-    posOffset.z *= 0.8;
+    posOffset.y *= 1.0; // Preserve vertical range for crouching (pliés)
+    posOffset.z *= 1.0;
     
     // Derive parent inverse rotation from rest-pose data (avoids decompose):
-    // q_parent = q_rest_world * q_rest_local⁻¹, so q_parent⁻¹ = q_rest_local * q_rest_world⁻¹
     const q_parent_inv = q_hips_rest_local.clone().multiply(q_rest_world_inv);
     const posOffsetLocal = posOffset.clone().applyQuaternion(q_parent_inv).multiplyScalar(100);
     hipsBone.position.copy(initialHipsPos).add(posOffsetLocal);
@@ -620,18 +649,27 @@ function updatePose(frameIdx) {
     updateTelemetryUI('mixamorig2Hips', hipsBone.quaternion, 'TRACKING');
   }
 
-  // 3. Update Bones hierarchically
-  BONE_UPDATE_ORDER.forEach(boneName => {
-    const bone = skeletonBones[boneName];
-    const mapping = BONE_MAPPINGS[boneName];
+  // 3. Update Bones hierarchically using depth-sorted traversal
+  allBonesSorted.forEach(bone => {
+    const boneName = bone.name;
+    if (boneName === 'mixamorig2Hips') {
+      return; // already updated in step 2
+    }
     
+    const mapping = BONE_MAPPINGS[boneName];
     if (bone && mapping) {
       const p_start = jointPositions[mapping.parentKp];
       const p_end = jointPositions[mapping.childKp];
       
-      if (p_start && p_end) {
+      if (p_start && p_end && p_start.distanceTo(p_end) > 0.0001) {
         // Target direction in world space
-        const v_world = new THREE.Vector3().subVectors(p_end, p_start).normalize();
+        const v_target_world = new THREE.Vector3().subVectors(p_end, p_start).normalize();
+        
+        // Shortest path rotation in world space from rest pose world direction to target world direction
+        const q_diff_world = new THREE.Quaternion().setFromUnitVectors(mapping.restDirWorld, v_target_world);
+        
+        // Combine with rest world rotation to get target world rotation
+        const q_target_world = q_diff_world.clone().multiply(mapping.restQuatWorld);
         
         // Parent's world rotation
         const q_parent_world = new THREE.Quaternion();
@@ -639,30 +677,34 @@ function updatePose(frameIdx) {
           bone.parent.matrixWorld.decompose(new THREE.Vector3(), q_parent_world, new THREE.Vector3());
         }
         
-        // Transform target direction to parent's local space
+        // Transform target world rotation to parent's local space
         const q_parent_world_inv = q_parent_world.clone().invert();
-        const v_local = v_world.clone().applyQuaternion(q_parent_world_inv).normalize();
+        const q_local = q_parent_world_inv.clone().multiply(q_target_world);
         
-        // Calculate the local rotation quaternion from the bone's default local direction to the target direction
-        const q_local = new THREE.Quaternion().setFromUnitVectors(mapping.defaultDir, v_local);
-        
-        // Apply quaternion rotation
+        // Apply local rotation
         bone.quaternion.copy(q_local);
-        
-        // Force update matrices so child bones can query updated parent world rotations
-        bone.updateMatrix();
-        if (bone.parent) {
-          bone.matrixWorld.multiplyMatrices(bone.parent.matrixWorld, bone.matrix);
-        } else {
-          bone.matrixWorld.copy(bone.matrix);
-        }
-        
         updateTelemetryUI(boneName, bone.quaternion, 'TRACKING');
       } else {
+        // Fallback if keypoints are collapsed/invalid
+        if (initialBoneQuaternions[boneName]) {
+          bone.quaternion.copy(initialBoneQuaternions[boneName]);
+        }
         updateTelemetryUI(boneName, bone.quaternion, 'MISSING KPS');
       }
     } else if (bone) {
+      // Keep static bones at their rest local pose
+      if (initialBoneQuaternions[boneName]) {
+        bone.quaternion.copy(initialBoneQuaternions[boneName]);
+      }
       updateTelemetryUI(boneName, bone.quaternion, 'STATIC');
+    }
+    
+    // Propagate matrix updates top-down
+    bone.updateMatrix();
+    if (bone.parent) {
+      bone.matrixWorld.multiplyMatrices(bone.parent.matrixWorld, bone.matrix);
+    } else {
+      bone.matrixWorld.copy(bone.matrix);
     }
   });
 
