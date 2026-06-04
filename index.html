@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Dancer Motion Sync</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Space+Grotesk:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/index.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo-area">
+        <div class="logo-icon"></div>
+        <h1>ANTIGRAVITY <span>MOTION SYNC</span></h1>
+      </div>
+      <div class="status-badge" id="system-status">Initializing...</div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="app-main">
+      <!-- Left Panel: Control Dashboard -->
+      <section class="side-panel left-panel">
+        <div class="panel-section">
+          <h2><span class="icon">⚙️</span> Control Panel</h2>
+          <div class="control-group">
+            <label for="video-select">Source Video</label>
+            <select id="video-select" class="custom-select">
+              <option value="not-catherine.mp4" selected>not-catherine.mp4 (Cached)</option>
+            </select>
+          </div>
+          
+          <div class="playback-controls">
+            <button id="btn-play-pause" class="btn btn-primary" title="Play / Pause">
+              <span id="play-icon">▶</span> Play
+            </button>
+            <button id="btn-reset" class="btn btn-secondary">↺ Reset</button>
+          </div>
+
+          <div class="speed-selector">
+            <span class="label-text">Speed</span>
+            <div class="btn-group">
+              <button class="btn btn-tab speed-btn" data-speed="0.25">0.25x</button>
+              <button class="btn btn-tab speed-btn" data-speed="0.5">0.5x</button>
+              <button class="btn btn-tab speed-btn active" data-speed="1.0">1.0x</button>
+              <button class="btn btn-tab speed-btn" data-speed="1.5">1.5x</button>
+              <button class="btn btn-tab speed-btn" data-speed="2.0">2.0x</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <h2><span class="icon">👁️</span> Visualization</h2>
+          <div class="checkbox-group">
+            <label class="custom-checkbox">
+              <input type="checkbox" id="chk-grid" checked>
+              <span class="checkmark"></span>
+              Show Floor Grid
+            </label>
+            <label class="custom-checkbox">
+              <input type="checkbox" id="chk-bones">
+              <span class="checkmark"></span>
+              Show Skeleton Helper
+            </label>
+            <label class="custom-checkbox">
+              <input type="checkbox" id="chk-mp-helper" checked>
+              <span class="checkmark"></span>
+              Show Reference Skeleton
+            </label>
+            <label class="custom-checkbox">
+              <input type="checkbox" id="chk-auto-camera" checked>
+              <span class="checkmark"></span>
+              Auto Orbit Camera
+            </label>
+          </div>
+        </div>
+
+        <div class="panel-section video-preview-container">
+          <h2><span class="icon">📹</span> Reference Video</h2>
+          <div class="video-wrapper">
+            <video id="ref-video" src="/not-catherine.mp4" loop muted playsinline></video>
+            <div class="video-overlay-status" id="video-overlay-status">No Keypoints Loaded</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Center Panel: 3D Viewport -->
+      <section class="viewport-panel">
+        <div id="three-container"></div>
+        
+        <!-- Legend Overlay -->
+        <div class="viewport-legend">
+          <div class="legend-item"><span class="legend-dot cyan"></span> Mapped glTF Model</div>
+          <div class="legend-item"><span class="legend-dot purple"></span> MediaPipe Keypoints</div>
+        </div>
+
+        <!-- Float Info -->
+        <div class="hud-overlay" id="hud-info">
+          <div>Frame: <span id="hud-frame">0</span> / <span id="hud-total">0</span></div>
+          <div>FPS: <span id="hud-fps">30.0</span></div>
+        </div>
+      </section>
+
+      <!-- Right Panel: Telemetry & Joints -->
+      <section class="side-panel right-panel">
+        <div class="panel-section fill-height">
+          <h2><span class="icon">📊</span> Bone Telemetry</h2>
+          <p class="panel-desc">Real-time local rotation values for Mixamo joints</p>
+          <div class="bone-list-container" id="bone-telemetry-list">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer: Timeline & Scrubbing -->
+    <footer class="app-footer">
+      <div class="timeline-container">
+        <span class="time-display" id="time-current">00:00</span>
+        <div class="slider-wrapper">
+          <input type="range" id="timeline-slider" min="0" max="100" value="0" step="1">
+          <div class="slider-progress" id="timeline-progress"></div>
+        </div>
+        <span class="time-display" id="time-total">00:00</span>
+      </div>
+    </footer>
+  </div>
+
+  <script type="module" src="/main.js"></script>
+</body>
+</html>
