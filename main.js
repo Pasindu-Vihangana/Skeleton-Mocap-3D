@@ -89,7 +89,7 @@ const BONE_MAPPINGS = {
     childBoneName: 'mixamorig2Spine1'
   },
   'mixamorig2LeftShoulder': {
-    parentKp: 'left_shoulder',
+    parentKp: 'mid_shoulder',
     childKp: 'left_shoulder',
     childBoneName: 'mixamorig2LeftArm'
   },
@@ -109,7 +109,7 @@ const BONE_MAPPINGS = {
     childBoneName: 'mixamorig2LeftHandIndex1'
   },
   'mixamorig2RightShoulder': {
-    parentKp: 'right_shoulder',
+    parentKp: 'mid_shoulder',
     childKp: 'right_shoulder',
     childBoneName: 'mixamorig2RightArm'
   },
@@ -649,6 +649,13 @@ function updatePose(frameIdx) {
     updateTelemetryUI('mixamorig2Hips', hipsBone.quaternion, 'TRACKING');
   }
 
+  // Decompose current body rotation relative to rest pose
+  const q_body_rotation = new THREE.Quaternion();
+  if (hipsBone) {
+    hipsBone.matrixWorld.decompose(new THREE.Vector3(), q_body_rotation, new THREE.Vector3());
+    q_body_rotation.multiply(q_hips_rest_world.clone().invert());
+  }
+
   // 3. Update Bones hierarchically using depth-sorted traversal
   allBonesSorted.forEach(bone => {
     const boneName = bone.name;
@@ -665,11 +672,15 @@ function updatePose(frameIdx) {
         // Target direction in world space
         const v_target_world = new THREE.Vector3().subVectors(p_end, p_start).normalize();
         
-        // Shortest path rotation in world space from rest pose world direction to target world direction
-        const q_diff_world = new THREE.Quaternion().setFromUnitVectors(mapping.restDirWorld, v_target_world);
+        // Rotate rest-pose world direction and quaternion by the current body rotation
+        const v_rest_world_current = mapping.restDirWorld.clone().applyQuaternion(q_body_rotation).normalize();
+        const q_rest_world_current = q_body_rotation.clone().multiply(mapping.restQuatWorld);
         
-        // Combine with rest world rotation to get target world rotation
-        const q_target_world = q_diff_world.clone().multiply(mapping.restQuatWorld);
+        // Shortest path rotation in world space from the rotated rest world direction to the target world direction
+        const q_diff_world = new THREE.Quaternion().setFromUnitVectors(v_rest_world_current, v_target_world);
+        
+        // Combine with rotated rest world rotation to get target world rotation
+        const q_target_world = q_diff_world.clone().multiply(q_rest_world_current);
         
         // Parent's world rotation
         const q_parent_world = new THREE.Quaternion();
