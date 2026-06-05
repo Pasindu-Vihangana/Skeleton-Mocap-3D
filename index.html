@@ -1,14 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>3D Dancer Motion Sync</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Space+Grotesk:wght@400;600&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Space+Grotesk:wght@400;600&display=swap"
+    rel="stylesheet">
   <link rel="stylesheet" href="/index.css">
 </head>
+
 <body>
   <div class="app-container">
     <!-- Header -->
@@ -29,10 +33,10 @@
           <div class="control-group">
             <label for="video-select">Source Video</label>
             <select id="video-select" class="custom-select">
-              <option value="not-catherine.mp4" selected>not-catherine.mp4 (Cached)</option>
+              <option value="also-not-catherine.mp4" selected>also-not-catherine.mp4 (Cached)</option>
             </select>
           </div>
-          
+
           <div class="playback-controls">
             <button id="btn-play-pause" class="btn btn-primary" title="Play / Pause">
               <span id="play-icon">▶</span> Play
@@ -81,7 +85,7 @@
         <div class="panel-section video-preview-container">
           <h2><span class="icon">📹</span> Reference Video</h2>
           <div class="video-wrapper">
-            <video id="ref-video" src="/not-catherine.mp4" loop muted playsinline></video>
+            <video id="ref-video" src="/also-not-catherine.mp4" loop muted playsinline></video>
             <div class="video-overlay-status" id="video-overlay-status">No Keypoints Loaded</div>
           </div>
         </div>
@@ -90,7 +94,7 @@
       <!-- Center Panel: 3D Viewport -->
       <section class="viewport-panel">
         <div id="three-container"></div>
-        
+
         <!-- Legend Overlay -->
         <div class="viewport-legend">
           <div class="legend-item"><span class="legend-dot cyan"></span> Mapped glTF Model</div>
@@ -131,4 +135,5 @@
 
   <script type="module" src="/main.js"></script>
 </body>
+
 </html>
