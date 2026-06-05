@@ -256,4 +256,4 @@ cython_debug/
 Thumbs.db
 
 # Project-specific scratch/temp directories
-scratch/
+# scratch/
