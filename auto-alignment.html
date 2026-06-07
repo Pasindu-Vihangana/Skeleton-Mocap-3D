@@ -1,59 +1,175 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <title>Bone ↔ Keypoint Alignment Test</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #111; color: #eee; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
-    #canvas-container { width: 100vw; height: 100vh; }
-    
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #111;
+      color: #eee;
+      font-family: 'Segoe UI', sans-serif;
+      overflow: hidden;
+    }
+
+    #canvas-container {
+      width: 100vw;
+      height: 100vh;
+    }
+
     #debug-panel {
-      position: fixed; top: 10px; right: 10px;
-      width: 400px; max-height: 90vh; overflow-y: auto;
-      background: rgba(0,0,0,0.9); border: 1px solid #333;
-      border-radius: 8px; padding: 12px; font-size: 12px;
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      width: 400px;
+      max-height: 90vh;
+      overflow-y: auto;
+      background: rgba(0, 0, 0, 0.9);
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 12px;
       z-index: 100;
     }
-    #debug-panel h2 { font-size: 14px; margin-bottom: 8px; color: #0ff; }
-    #debug-panel h3 { font-size: 12px; margin: 10px 0 4px; color: #f0f; }
+
+    #debug-panel h2 {
+      font-size: 14px;
+      margin-bottom: 8px;
+      color: #0ff;
+    }
+
+    #debug-panel h3 {
+      font-size: 12px;
+      margin: 10px 0 4px;
+      color: #f0f;
+    }
+
     .joint-row {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 3px 6px; border-bottom: 1px solid #222; font-family: monospace; font-size: 11px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 3px 6px;
+      border-bottom: 1px solid #222;
+      font-family: monospace;
+      font-size: 11px;
     }
-    .joint-row:hover { background: #222; }
-    .joint-name { color: #aaa; min-width: 110px; }
-    .pos-bone { color: #00ffcc; }
-    .pos-kp { color: #ff00ff; }
-    .pos-diff { color: #ffaa00; }
-    .good { color: #0f0; }
-    .bad { color: #f44; }
-    
+
+    .joint-row:hover {
+      background: #222;
+    }
+
+    .joint-name {
+      color: #aaa;
+      min-width: 110px;
+    }
+
+    .pos-bone {
+      color: #00ffcc;
+    }
+
+    .pos-kp {
+      color: #ff00ff;
+    }
+
+    .pos-diff {
+      color: #ffaa00;
+    }
+
+    .good {
+      color: #0f0;
+    }
+
+    .bad {
+      color: #f44;
+    }
+
     #controls-panel {
-      position: fixed; top: 10px; left: 10px;
-      background: rgba(0,0,0,0.9); border: 1px solid #333;
-      border-radius: 8px; padding: 12px; z-index: 100; min-width: 240px;
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.9);
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 12px;
+      z-index: 100;
+      min-width: 240px;
     }
-    #controls-panel label { display: block; margin: 4px 0; cursor: pointer; font-size: 13px; }
-    #controls-panel input[type="range"] { width: 180px; }
-    #controls-panel select, #controls-panel button {
-      margin: 4px 0; padding: 6px 12px; background: #222; border: 1px solid #555;
-      color: #eee; border-radius: 4px; cursor: pointer; font-size: 12px;
+
+    #controls-panel label {
+      display: block;
+      margin: 4px 0;
+      cursor: pointer;
+      font-size: 13px;
     }
-    #controls-panel button:hover { background: #444; }
-    .legend { display: flex; gap: 16px; margin: 8px 0; font-size: 12px; flex-wrap: wrap; }
-    .legend-item { display: flex; align-items: center; gap: 4px; }
-    .legend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
-    .auto-info { background: #1a3a1a; border: 1px solid #3a5a3a; border-radius: 4px; padding: 6px; margin: 6px 0; font-size: 11px; font-family: monospace; }
+
+    #controls-panel input[type="range"] {
+      width: 180px;
+    }
+
+    #controls-panel select,
+    #controls-panel button {
+      margin: 4px 0;
+      padding: 6px 12px;
+      background: #222;
+      border: 1px solid #555;
+      color: #eee;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    #controls-panel button:hover {
+      background: #444;
+    }
+
+    .legend {
+      display: flex;
+      gap: 16px;
+      margin: 8px 0;
+      font-size: 12px;
+      flex-wrap: wrap;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .auto-info {
+      background: #1a3a1a;
+      border: 1px solid #3a5a3a;
+      border-radius: 4px;
+      padding: 6px;
+      margin: 6px 0;
+      font-size: 11px;
+      font-family: monospace;
+    }
   </style>
 </head>
+
 <body>
   <div id="canvas-container"></div>
-  
+
   <div id="controls-panel">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
       <h2 style="color:#0ff; font-size:14px; margin: 0;">🔬 Alignment Test</h2>
-      <a href="/" style="text-decoration: none; padding: 4px 8px; background: #222; border: 1px solid #555; color: #eee; border-radius: 4px; font-size: 11px; font-weight: bold; display: inline-flex; align-items: center; gap: 4px;">🏠 Home</a>
+      <a href="/"
+        style="text-decoration: none; padding: 4px 8px; background: #222; border: 1px solid #555; color: #eee; border-radius: 4px; font-size: 11px; font-weight: bold; display: inline-flex; align-items: center; gap: 4px;">🏠
+        Home</a>
     </div>
     <div class="legend">
       <div class="legend-item"><span class="legend-dot" style="background:#00ffcc"></span> Model Bones</div>
@@ -80,14 +196,16 @@
       <input type="range" id="yoffset-slider" min="-2" max="3" step="0.01" value="0.00">
     </label>
     <hr style="border-color:#333; margin:8px 0">
-    <button id="btn-auto-align" style="background:#1a4a1a; border-color:#3a8a3a;">⚡ Auto-Align KP to Model</button>
-    <button id="btn-reset-view">Reset Camera</button>
-    <button id="btn-front-view">Front View</button>
-    <button id="btn-side-view">Side View</button>
-    <button id="btn-dump">Dump Data to Console</button>
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <button id="btn-auto-align" style="background:#1a4a1a; border-color:#3a8a3a;">⚡ Auto-Align KP to Model</button>
+      <button id="btn-reset-view">Reset Camera</button>
+      <button id="btn-front-view">Front View</button>
+      <button id="btn-side-view">Side View</button>
+      <button id="btn-dump">Dump Data to Console</button>
+    </div>
     <div id="auto-info" class="auto-info" style="display:none;"></div>
   </div>
-  
+
   <div id="debug-panel">
     <h2>Joint Position Comparison</h2>
     <div style="font-size:10px; color:#888; margin-bottom:6px;">Bone(cyan) → KP(magenta) | Distance</div>
@@ -95,7 +213,9 @@
     <h3>Direction Analysis</h3>
     <div id="direction-info" style="font-family:monospace; font-size:11px; color:#aaa;"></div>
     <h3>Hierarchy Debug</h3>
-    <div id="hierarchy-info" style="font-family:monospace; font-size:10px; white-space:pre; color:#888; max-height: 300px; overflow-y: auto;"></div>
+    <div id="hierarchy-info"
+      style="font-family:monospace; font-size:10px; white-space:pre; color:#888; max-height: 300px; overflow-y: auto;">
+    </div>
   </div>
 
   <script type="importmap">
@@ -116,23 +236,23 @@
     // Note: mixamorig2LeftShoulder is a connector bone near the neck.
     // The actual shoulder joint position corresponds to mixamorig2LeftArm.
     const JOINT_MAP = {
-      'left_shoulder':  'mixamorig2LeftArm',       // shoulder joint = start of upper arm
+      'left_shoulder': 'mixamorig2LeftArm',       // shoulder joint = start of upper arm
       'right_shoulder': 'mixamorig2RightArm',
-      'left_elbow':     'mixamorig2LeftForeArm',
-      'right_elbow':    'mixamorig2RightForeArm',
-      'left_wrist':     'mixamorig2LeftHand',
-      'right_wrist':    'mixamorig2RightHand',
-      'left_hip':       'mixamorig2LeftUpLeg',
-      'right_hip':      'mixamorig2RightUpLeg',
-      'left_knee':      'mixamorig2LeftLeg',
-      'right_knee':     'mixamorig2RightLeg',
-      'left_ankle':     'mixamorig2LeftFoot',
-      'right_ankle':    'mixamorig2RightFoot',
+      'left_elbow': 'mixamorig2LeftForeArm',
+      'right_elbow': 'mixamorig2RightForeArm',
+      'left_wrist': 'mixamorig2LeftHand',
+      'right_wrist': 'mixamorig2RightHand',
+      'left_hip': 'mixamorig2LeftUpLeg',
+      'right_hip': 'mixamorig2RightUpLeg',
+      'left_knee': 'mixamorig2LeftLeg',
+      'right_knee': 'mixamorig2RightLeg',
+      'left_ankle': 'mixamorig2LeftFoot',
+      'right_ankle': 'mixamorig2RightFoot',
     };
 
     const EXTRA_BONES = ['mixamorig2Hips', 'mixamorig2Spine', 'mixamorig2Spine1', 'mixamorig2Spine2',
-                         'mixamorig2Head', 'mixamorig2Neck',
-                         'mixamorig2LeftShoulder', 'mixamorig2RightShoulder'];
+      'mixamorig2Head', 'mixamorig2Neck',
+      'mixamorig2LeftShoulder', 'mixamorig2RightShoulder'];
 
     const KP_SKELETON_CONNECTIONS = [
       ['left_shoulder', 'right_shoulder'],
@@ -284,7 +404,7 @@
       const spineWP = new THREE.Vector3();
       const lulWP = new THREE.Vector3();
       const rulWP = new THREE.Vector3();
-      
+
       skeletonBones['mixamorig2Hips'].getWorldPosition(hipsWP);
       skeletonBones['mixamorig2Spine'].getWorldPosition(spineWP);
       skeletonBones['mixamorig2LeftUpLeg'].getWorldPosition(lulWP);
@@ -316,7 +436,7 @@
     function logHierarchy() {
       const infoEl = document.getElementById('hierarchy-info');
       let text = '';
-      
+
       const hips = skeletonBones['mixamorig2Hips'];
       if (hips) {
         text += '=== Hips → Root Chain ===\n';
@@ -329,7 +449,7 @@
           const euler = new THREE.Euler().setFromQuaternion(wq, 'XYZ');
           text += `${node.name || '(unnamed)'} [${node.type}]\n`;
           text += `  local pos: (${node.position.x.toFixed(1)}, ${node.position.y.toFixed(1)}, ${node.position.z.toFixed(1)})\n`;
-          text += `  local rot: (${(node.rotation.x*180/Math.PI).toFixed(1)}°, ${(node.rotation.y*180/Math.PI).toFixed(1)}°, ${(node.rotation.z*180/Math.PI).toFixed(1)}°)\n`;
+          text += `  local rot: (${(node.rotation.x * 180 / Math.PI).toFixed(1)}°, ${(node.rotation.y * 180 / Math.PI).toFixed(1)}°, ${(node.rotation.z * 180 / Math.PI).toFixed(1)}°)\n`;
           text += `  world pos: (${wp.x.toFixed(4)}, ${wp.y.toFixed(4)}, ${wp.z.toFixed(4)})\n`;
           text += `  world scl: (${ws.x.toFixed(4)}, ${ws.y.toFixed(4)}, ${ws.z.toFixed(4)})\n\n`;
           node = node.parent;
@@ -337,11 +457,11 @@
 
         text += '\n=== Key Bone World Positions ===\n';
         const keyBones = ['mixamorig2Hips', 'mixamorig2Spine', 'mixamorig2Spine1', 'mixamorig2Head',
-                          'mixamorig2LeftShoulder', 'mixamorig2RightShoulder',
-                          'mixamorig2LeftArm', 'mixamorig2RightArm',
-                          'mixamorig2LeftUpLeg', 'mixamorig2RightUpLeg',
-                          'mixamorig2LeftLeg', 'mixamorig2RightLeg',
-                          'mixamorig2LeftFoot', 'mixamorig2RightFoot'];
+          'mixamorig2LeftShoulder', 'mixamorig2RightShoulder',
+          'mixamorig2LeftArm', 'mixamorig2RightArm',
+          'mixamorig2LeftUpLeg', 'mixamorig2RightUpLeg',
+          'mixamorig2LeftLeg', 'mixamorig2RightLeg',
+          'mixamorig2LeftFoot', 'mixamorig2RightFoot'];
         keyBones.forEach(name => {
           const bone = skeletonBones[name];
           if (bone) {
@@ -353,7 +473,7 @@
           }
         });
       }
-      
+
       infoEl.textContent = text;
     }
 
@@ -403,7 +523,7 @@
           const totalFrames = data.total_frames || Object.keys(data.frames).length;
           document.getElementById('frame-slider').max = totalFrames - 1;
           createKPSpheres();
-          
+
           // Auto-align on load
           autoAlign();
           updateFrame(0);
@@ -508,7 +628,7 @@
         } else {
           kp = getMPKeypoint(kps[kpName]);
         }
-        
+
         if (kp) {
           kp.multiplyScalar(kpScale);
           kp.y += kpYOffset;
@@ -585,7 +705,7 @@
 
       const midHip = lh.clone().add(rh).multiplyScalar(0.5);
       const midShoulder = ls.clone().add(rs).multiplyScalar(0.5);
-      
+
       midHip.multiplyScalar(kpScale); midHip.y += kpYOffset;
       midShoulder.multiplyScalar(kpScale); midShoulder.y += kpYOffset;
 
@@ -612,7 +732,7 @@
 
     function updateDirectionAnalysis(kps) {
       const dirEl = document.getElementById('direction-info');
-      
+
       // Model forward direction
       const hipsWP = new THREE.Vector3(), spineWP = new THREE.Vector3();
       const lulWP = new THREE.Vector3(), rulWP = new THREE.Vector3();
@@ -630,7 +750,7 @@
       const rh = getMPKeypoint(kps['right_hip']);
       const ls = getMPKeypoint(kps['left_shoulder']);
       const rs = getMPKeypoint(kps['right_shoulder']);
-      
+
       let kpInfo = 'N/A';
       if (lh && rh && ls && rs) {
         const kpMidHip = lh.clone().add(rh).multiplyScalar(0.5);
@@ -666,25 +786,25 @@ ${kpInfo}`;
       const table = document.getElementById('joint-table');
       let html = '';
       let totalDist = 0, count = 0;
-      
+
       Object.entries(JOINT_MAP).forEach(([kpName, boneName]) => {
         const bone = skeletonBones[boneName];
         const kpRaw = kps[kpName];
-        
+
         if (bone && kpRaw) {
           const boneWP = new THREE.Vector3();
           bone.getWorldPosition(boneWP);
-          
+
           const kpPos = getMPKeypoint(kpRaw);
           kpPos.multiplyScalar(kpScale);
           kpPos.y += kpYOffset;
-          
+
           const dist = boneWP.distanceTo(kpPos);
           totalDist += dist;
           count++;
-          
+
           const distClass = dist < 0.05 ? 'good' : (dist < 0.15 ? 'pos-diff' : 'bad');
-          
+
           html += `<div class="joint-row">
             <span class="joint-name">${kpName}</span>
             <span class="pos-bone">(${boneWP.x.toFixed(2)}, ${boneWP.y.toFixed(2)}, ${boneWP.z.toFixed(2)})</span>
@@ -693,7 +813,7 @@ ${kpInfo}`;
           </div>`;
         }
       });
-      
+
       if (count > 0) {
         const avgDist = totalDist / count;
         html = `<div class="joint-row" style="border-bottom:2px solid #555; font-weight:bold;">
@@ -702,7 +822,7 @@ ${kpInfo}`;
           <span class="${avgDist < 0.05 ? 'good' : (avgDist < 0.15 ? 'pos-diff' : 'bad')}">${avgDist.toFixed(3)}</span>
         </div>` + html;
       }
-      
+
       table.innerHTML = html;
     }
 
@@ -798,7 +918,7 @@ ${kpInfo}`;
           bone.getWorldPosition(wp);
           console.log(`${name}: worldPos=(${wp.x.toFixed(4)}, ${wp.y.toFixed(4)}, ${wp.z.toFixed(4)}), localPos=(${bone.position.x.toFixed(2)}, ${bone.position.y.toFixed(2)}, ${bone.position.z.toFixed(2)})`);
         });
-        
+
         if (keypointData) {
           const frame = keypointData.frames[currentFrame.toString()];
           if (frame) {
@@ -828,4 +948,5 @@ ${kpInfo}`;
     animate();
   </script>
 </body>
+
 </html>
