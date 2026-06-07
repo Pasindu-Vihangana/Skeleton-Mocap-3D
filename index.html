@@ -22,7 +22,9 @@
         <h1>3D MOTION CAPTURE<span>Skeleton MOCAP v0.4</span></h1>
       </div>
       <div class="header-actions">
-        <a href="/auto-alignment.html" class="btn btn-secondary nav-btn" style="text-decoration: none; padding: 6px 12px; height: 32px; font-size: 0.8rem; display: inline-flex; align-items: center; border-radius: 20px;">🔬 Auto-Alignment</a>
+        <a href="/auto-alignment.html" class="btn btn-secondary nav-btn"
+          style="text-decoration: none; padding: 6px 12px; height: 32px; font-size: 0.8rem; display: inline-flex; align-items: center; border-radius: 20px;">🔬
+          Auto-Alignment</a>
         <div class="status-badge" id="system-status">Initializing...</div>
       </div>
     </header>
@@ -87,13 +89,7 @@
           </div>
         </div>
 
-        <div class="panel-section video-preview-container">
-          <h2><span class="icon">📹</span> Reference Video</h2>
-          <div class="video-wrapper">
-            <video id="ref-video" src="/videos/not-catherine.mp4" loop muted playsinline></video>
-            <div class="video-overlay-status" id="video-overlay-status">No Keypoints Loaded</div>
-          </div>
-        </div>
+
       </section>
 
       <!-- Center Panel: 3D Viewport -->
@@ -115,6 +111,13 @@
 
       <!-- Right Panel: Telemetry & Joints -->
       <section class="side-panel right-panel">
+        <div class="panel-section video-preview-container">
+          <h2><span class="icon">📹</span> Reference Video</h2>
+          <div class="video-wrapper">
+            <video id="ref-video" src="/videos/not-catherine.mp4" loop muted playsinline></video>
+            <div class="video-overlay-status" id="video-overlay-status">No Keypoints Loaded</div>
+          </div>
+        </div>
         <div class="panel-section fill-height">
           <h2><span class="icon">📊</span> Bone Telemetry</h2>
           <p class="panel-desc">Real-time local rotation values for Mixamo joints</p>
@@ -136,21 +139,22 @@
         <span class="time-display" id="time-total">00:00</span>
       </div>
     </footer>
-  <!-- Processing Overlay -->
-  <div id="processing-overlay" class="processing-overlay" style="display: none;">
-    <div class="processing-card">
-      <div class="processing-spinner"></div>
-      <h3>Processing Video</h3>
-      <p id="processing-status">Initializing MediaPipe Pose Landmarker...</p>
-      <div class="processing-progress-bar">
-        <div id="processing-progress-fill" class="processing-progress-fill"></div>
+    <!-- Processing Overlay -->
+    <div id="processing-overlay" class="processing-overlay" style="display: none;">
+      <div class="processing-card">
+        <div class="processing-spinner"></div>
+        <h3>Processing Video</h3>
+        <p id="processing-status">Initializing MediaPipe Pose Landmarker...</p>
+        <div class="processing-progress-bar">
+          <div id="processing-progress-fill" class="processing-progress-fill"></div>
+        </div>
+        <p id="processing-frame-count">Frame 0 / 0</p>
+        <button id="btn-cancel-processing" class="btn btn-secondary"
+          style="margin-top: 15px; width: 100%;">Cancel</button>
       </div>
-      <p id="processing-frame-count">Frame 0 / 0</p>
-      <button id="btn-cancel-processing" class="btn btn-secondary" style="margin-top: 15px; width: 100%;">Cancel</button>
     </div>
-  </div>
 
-  <script type="module" src="/main.js"></script>
+    <script type="module" src="/main.js"></script>
 </body>
 
 </html>
