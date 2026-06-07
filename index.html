@@ -21,7 +21,10 @@
         <div class="logo-icon"></div>
         <h1>3D MOTION CAPTURE<span>Skeleton MOCAP v0.4</span></h1>
       </div>
-      <div class="status-badge" id="system-status">Initializing...</div>
+      <div class="header-actions">
+        <a href="/auto-alignment.html" class="btn btn-secondary nav-btn" style="text-decoration: none; padding: 6px 12px; height: 32px; font-size: 0.8rem; display: inline-flex; align-items: center; border-radius: 20px;">🔬 Auto-Alignment</a>
+        <div class="status-badge" id="system-status">Initializing...</div>
+      </div>
     </header>
 
     <!-- Main Workspace -->
@@ -33,8 +36,10 @@
           <div class="control-group">
             <label for="video-select">Source Video</label>
             <select id="video-select" class="custom-select">
-              <option value="also-not-catherine.mp4" selected>also-not-catherine.mp4 (Cached)</option>
+              <option value="/videos/not-catherine.mp4" selected>not-catherine.mp4 (Default)</option>
+              <option value="custom">📁 Choose Custom Video...</option>
             </select>
+            <input type="file" id="video-file-input" accept="video/*" style="display: none;">
           </div>
 
           <div class="playback-controls">
@@ -85,7 +90,7 @@
         <div class="panel-section video-preview-container">
           <h2><span class="icon">📹</span> Reference Video</h2>
           <div class="video-wrapper">
-            <video id="ref-video" src="/also-not-catherine.mp4" loop muted playsinline></video>
+            <video id="ref-video" src="/videos/not-catherine.mp4" loop muted playsinline></video>
             <div class="video-overlay-status" id="video-overlay-status">No Keypoints Loaded</div>
           </div>
         </div>
@@ -131,6 +136,18 @@
         <span class="time-display" id="time-total">00:00</span>
       </div>
     </footer>
+  <!-- Processing Overlay -->
+  <div id="processing-overlay" class="processing-overlay" style="display: none;">
+    <div class="processing-card">
+      <div class="processing-spinner"></div>
+      <h3>Processing Video</h3>
+      <p id="processing-status">Initializing MediaPipe Pose Landmarker...</p>
+      <div class="processing-progress-bar">
+        <div id="processing-progress-fill" class="processing-progress-fill"></div>
+      </div>
+      <p id="processing-frame-count">Frame 0 / 0</p>
+      <button id="btn-cancel-processing" class="btn btn-secondary" style="margin-top: 15px; width: 100%;">Cancel</button>
+    </div>
   </div>
 
   <script type="module" src="/main.js"></script>

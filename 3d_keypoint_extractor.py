@@ -12,7 +12,7 @@ from mediapipe.tasks.python import vision
 ssl._create_default_https_context = ssl._create_unverified_context
 
 # Tuning Parameters
-MODEL_COMPLEXITY = "heavy"        # "lite", "full", or "heavy" (heavy is recommended for accurate depth)
+MODEL_COMPLEXITY = "full"        # "lite", "full", or "heavy" (heavy is recommended for accurate depth)
 MIN_POSE_DETECTION_CONFIDENCE = 0.6
 MIN_POSE_PRESENCE_CONFIDENCE = 0.6
 MIN_TRACKING_CONFIDENCE = 0.6
@@ -33,7 +33,7 @@ MODEL_URLS = {
     "heavy": "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task"
 }
 
-MODEL_PATH = f"pose_landmarker_{MODEL_COMPLEXITY}.task"
+MODEL_PATH = "public/pose_landmarker_full.task"
 
 if MODEL_COMPLEXITY not in MODEL_URLS:
     raise ValueError(f"Invalid MODEL_COMPLEXITY: {MODEL_COMPLEXITY}. Choose from 'lite', 'full', 'heavy'.")
@@ -247,7 +247,7 @@ def process_dance_video_optimized(video_path, output_json_path, debug_video_path
 
 if __name__ == "__main__":
     process_dance_video_optimized(
-        "also-not-catherine.mp4", 
+        "public/videos/not-catherine.mp4", 
         "public/dance_3d_keypoints.json", 
         "public/debug_playback.mp4"
     )

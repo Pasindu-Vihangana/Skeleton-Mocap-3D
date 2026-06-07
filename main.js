@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
+
 // DOM Elements
 const systemStatusEl = document.getElementById('system-status');
 const btnPlayPause = document.getElementById('btn-play-pause');
@@ -23,6 +24,15 @@ const timelineSlider = document.getElementById('timeline-slider');
 const timelineProgress = document.getElementById('timeline-progress');
 const timeCurrent = document.getElementById('time-current');
 const timeTotal = document.getElementById('time-total');
+
+// Custom Video & Processing DOM
+const videoSelect = document.getElementById('video-select');
+const videoFileInput = document.getElementById('video-file-input');
+const processingOverlay = document.getElementById('processing-overlay');
+const processingStatus = document.getElementById('processing-status');
+const processingProgressFill = document.getElementById('processing-progress-fill');
+const processingFrameCount = document.getElementById('processing-frame-count');
+const btnCancelProcessing = document.getElementById('btn-cancel-processing');
 
 // Playback State
 let keypointData = null;
@@ -60,6 +70,11 @@ let mpLineGeometry = null;
 const positionScale = 1.0; // scale MediaPipe hips translations
 const skeletonScale = 1.0; // scale reference skeleton
 const refSkeletonOffset = new THREE.Vector3(1.2, 0, 0); // side-by-side display offset
+
+// MediaPipe State
+let poseLandmarker = null;
+let shouldCancelProcessing = false;
+let defaultKeypointData = null; // cached default JSON
 
 // Mixamo Bone Names
 const BONE_NAMES = [
@@ -190,6 +205,220 @@ const MP_LANDMARKS = [
   'left_knee', 'right_knee', 'left_ankle', 'right_ankle',
   'left_index', 'right_index'
 ];
+
+// MediaPipe Pose Landmark Names
+const POSE_LANDMARK_NAMES = [
+  "nose", "left_eye_inner", "left_eye", "left_eye_outer",
+  "right_eye_inner", "right_eye", "right_eye_outer",
+  "left_ear", "right_ear", "mouth_left", "mouth_right",
+  "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+  "left_wrist", "right_wrist", "left_pinky", "right_pinky",
+  "left_index", "right_index", "left_thumb", "right_thumb",
+  "left_hip", "right_hip", "left_knee", "right_knee",
+  "left_ankle", "right_ankle", "left_heel", "right_heel",
+  "left_foot_index", "right_foot_index"
+];
+
+/* One Euro Filter Class for smoothing */
+class OneEuroFilter {
+  constructor(freq, mincutoff = 1.0, beta = 0.0, dcutoff = 1.0) {
+    this.freq = freq;
+    this.mincutoff = mincutoff;
+    this.beta = beta;
+    this.dcutoff = dcutoff;
+    this.x_prev = null;
+    this.dx_prev = null;
+    this.t_prev = null;
+  }
+
+  _smoothingFactor(t_e, cutoff) {
+    const r = 2 * Math.PI * cutoff * t_e;
+    return r / (r + 1);
+  }
+
+  _exponentialSmoothing(a, x, x_prev) {
+    return a * x + (1 - a) * x_prev;
+  }
+
+  filter(x, timestamp) {
+    if (this.x_prev === null) {
+      this.x_prev = x;
+      this.dx_prev = 0.0;
+      this.t_prev = timestamp;
+      return x;
+    }
+
+    const t_e = timestamp - this.t_prev;
+    this.t_prev = timestamp;
+
+    if (t_e <= 0) {
+      return this.x_prev;
+    }
+
+    const a_d = this._smoothingFactor(t_e, this.dcutoff);
+    const dx = (x - this.x_prev) / t_e;
+    const dx_hat = this._exponentialSmoothing(a_d, dx, this.dx_prev);
+
+    const cutoff = this.mincutoff + this.beta * Math.abs(dx_hat);
+    const a = this._smoothingFactor(t_e, cutoff);
+    const x_hat = this._exponentialSmoothing(a, x, this.x_prev);
+
+    this.x_prev = x_hat;
+    this.dx_prev = dx_hat;
+    return x_hat;
+  }
+}
+
+let mediaPipeTasksVision = null;
+
+/* Initialize MediaPipe Pose Landmarker */
+async function initPoseLandmarker() {
+  if (poseLandmarker) return poseLandmarker;
+  
+  setStatus('Loading MediaPipe Pose Landmarker...');
+  if (!mediaPipeTasksVision) {
+    mediaPipeTasksVision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/vision_bundle.mjs');
+  }
+  const { FilesetResolver, PoseLandmarker } = mediaPipeTasksVision;
+
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm"
+  );
+  poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: "/pose_landmarker_full.task",
+      delegate: "GPU"
+    },
+    runningMode: "VIDEO",
+    numPoses: 1
+  });
+  return poseLandmarker;
+}
+
+/* Process Video File to Extract Keypoints */
+async function processVideoFile(fileOrUrl, onProgress) {
+  const landmarker = await initPoseLandmarker();
+  shouldCancelProcessing = false;
+  
+  // Create an offscreen video element
+  const video = document.createElement('video');
+  video.muted = true;
+  video.playsInline = true;
+  
+  if (typeof fileOrUrl === 'string') {
+    video.src = fileOrUrl;
+  } else {
+    video.src = URL.createObjectURL(fileOrUrl);
+  }
+  
+  video.load();
+  
+  await new Promise((resolve, reject) => {
+    video.onloadedmetadata = () => resolve();
+    video.onerror = (e) => reject(new Error('Failed to load video file metadata. Make sure it is a valid video.'));
+  });
+  
+  const duration = video.duration;
+  const processFps = 30; // standard default
+  const totalFrames = Math.max(1, Math.floor(duration * processFps));
+  
+  const filters_3d = Array.from({ length: 33 }, () => [
+    new OneEuroFilter(processFps, 0.5, 0.05, 1.0),
+    new OneEuroFilter(processFps, 0.5, 0.05, 1.0),
+    new OneEuroFilter(processFps, 0.5, 0.05, 1.0)
+  ]);
+  
+  const filters_2d = Array.from({ length: 33 }, () => [
+    new OneEuroFilter(processFps, 0.5, 0.05, 1.0),
+    new OneEuroFilter(processFps, 0.5, 0.05, 1.0),
+    new OneEuroFilter(processFps, 0.5, 0.05, 1.0)
+  ]);
+  
+  const finalOutput = {
+    fps: processFps,
+    total_frames: totalFrames,
+    frames: {}
+  };
+  
+  for (let frameIdx = 0; frameIdx < totalFrames; frameIdx++) {
+    if (shouldCancelProcessing) {
+      throw new Error('Processing cancelled by user');
+    }
+    
+    const timestampSec = frameIdx / processFps;
+    const timestampMs = Math.round(timestampSec * 1000);
+    
+    // Seek video
+    video.currentTime = timestampSec;
+    await new Promise((resolve) => {
+      video.onseeked = resolve;
+    });
+    
+    // Detect pose
+    const results = landmarker.detectForVideo(video, timestampMs);
+    
+    const keypoints_3d = {};
+    const keypoints_2d = {};
+    
+    // 1. Process 3D world landmarks
+    if (results.poseWorldLandmarks && results.poseWorldLandmarks.length > 0) {
+      const worldLandmarks = results.poseWorldLandmarks[0];
+      for (let i = 0; i < POSE_LANDMARK_NAMES.length; i++) {
+        const name = POSE_LANDMARK_NAMES[i];
+        const lm = worldLandmarks[i];
+        
+        // Negate Y coordinate to align with Three.js Y-up
+        const x_val = filters_3d[i][0].filter(lm.x, timestampSec);
+        const y_val = filters_3d[i][1].filter(-lm.y, timestampSec);
+        const z_val = filters_3d[i][2].filter(lm.z, timestampSec);
+        
+        keypoints_3d[name] = {
+          x: x_val,
+          y: y_val,
+          z: z_val,
+          visibility: lm.visibility || 0.0
+        };
+      }
+    } else {
+      for (const name of POSE_LANDMARK_NAMES) {
+        keypoints_3d[name] = { x: 0.0, y: 0.0, z: 0.0, visibility: 0.0 };
+      }
+    }
+    
+    // 2. Process 2D image landmarks
+    if (results.poseLandmarks && results.poseLandmarks.length > 0) {
+      const imageLandmarks = results.poseLandmarks[0];
+      for (let i = 0; i < POSE_LANDMARK_NAMES.length; i++) {
+        const name = POSE_LANDMARK_NAMES[i];
+        const lm = imageLandmarks[i];
+        
+        const x_val = filters_2d[i][0].filter(lm.x, timestampSec);
+        const y_val = filters_2d[i][1].filter(lm.y, timestampSec);
+        const z_val = filters_2d[i][2].filter(lm.z, timestampSec);
+        
+        keypoints_2d[name] = {
+          x: x_val,
+          y: y_val,
+          z: z_val,
+          visibility: lm.visibility || 0.0
+        };
+      }
+    } else {
+      for (const name of POSE_LANDMARK_NAMES) {
+        keypoints_2d[name] = { x: 0.0, y: 0.0, z: 0.0, visibility: 0.0 };
+      }
+    }
+    
+    finalOutput.frames[frameIdx.toString()] = {
+      keypoints_3d,
+      keypoints_2d
+    };
+    
+    onProgress(frameIdx + 1, totalFrames);
+  }
+  
+  return finalOutput;
+}
 
 /* Initialize Scene */
 function initThree() {
@@ -470,48 +699,59 @@ function loadDancerModel() {
   );
 }
 
+/* Apply JSON Keypoints to Playback State */
+function applyKeypointData(data) {
+  keypointData = data;
+  fps = data.fps || 30;
+  totalFrames = data.total_frames || Object.keys(data.frames).length;
+  frameDurationMs = 1000 / fps;
+  
+  timelineSlider.max = totalFrames - 1;
+  hudTotal.textContent = totalFrames;
+  hudFps.textContent = fps.toFixed(1);
+  
+  // Display duration
+  const totalSecs = totalFrames / fps;
+  timeTotal.textContent = formatTime(totalSecs);
+  
+  // Compute first frame's mid-hip keypoint for relative tracking
+  const firstFrame = data.frames['0'] || data.frames[Object.keys(data.frames)[0]];
+  if (firstFrame && firstFrame.keypoints_3d) {
+    const lh = getMPKeypoint(firstFrame.keypoints_3d['left_hip']);
+    const rh = getMPKeypoint(firstFrame.keypoints_3d['right_hip']);
+    firstFrameMidHip = new THREE.Vector3().addVectors(lh, rh).multiplyScalar(0.5);
+    console.log('Successfully initialized firstFrameMidHip:', firstFrameMidHip);
+  }
+
+  // Build Telemetry Card List in DOM
+  buildTelemetryUI();
+  
+  // Initialize first frame skeleton pose
+  setFrame(0);
+}
+
 /* Load JSON Keypoints */
 function loadKeypoints() {
+  if (defaultKeypointData) {
+    applyKeypointData(defaultKeypointData);
+    videoOverlayStatus.textContent = `${totalFrames} default frames loaded`;
+    return;
+  }
+
   setStatus('Loading keypoints database...');
   
   fetch('/dance_3d_keypoints.json')
     .then(response => response.json())
     .then(data => {
-      keypointData = data;
-      fps = data.fps || 30;
-      totalFrames = data.total_frames || Object.keys(data.frames).length;
-      frameDurationMs = 1000 / fps;
-      
-      timelineSlider.max = totalFrames - 1;
-      hudTotal.textContent = totalFrames;
-      hudFps.textContent = fps.toFixed(1);
-      
-      // Display duration
-      const totalSecs = totalFrames / fps;
-      timeTotal.textContent = formatTime(totalSecs);
-      
+      defaultKeypointData = data;
+      applyKeypointData(data);
       setStatus('Ready to Dance');
       systemStatusEl.classList.add('ready');
-      videoOverlayStatus.textContent = `${totalFrames} frames loaded`;
-      
-      // Compute first frame's mid-hip keypoint for relative tracking
-      const firstFrame = data.frames['0'] || data.frames[Object.keys(data.frames)[0]];
-      if (firstFrame && firstFrame.keypoints_3d) {
-        const lh = getMPKeypoint(firstFrame.keypoints_3d['left_hip']);
-        const rh = getMPKeypoint(firstFrame.keypoints_3d['right_hip']);
-        firstFrameMidHip = new THREE.Vector3().addVectors(lh, rh).multiplyScalar(0.5);
-        console.log('Successfully initialized firstFrameMidHip:', firstFrameMidHip);
-      }
-
-      // Build Telemetry Card List in DOM
-      buildTelemetryUI();
-      
-      // Initialize first frame skeleton pose
-      updatePose(0);
+      videoOverlayStatus.textContent = `${totalFrames} default frames loaded`;
     })
     .catch(err => {
       console.error(err);
-      setStatus('Error loading keypoint JSON. Make sure python script ran successfully.');
+      setStatus('Error loading keypoint JSON.');
       videoOverlayStatus.textContent = 'Failed to load keypoints';
     });
 }
@@ -868,6 +1108,19 @@ function onWindowResize() {
   renderer.setSize(width, height);
 }
 
+function resetPlayback() {
+  isPlaying = false;
+  playIcon.textContent = '▶';
+  btnPlayPause.innerHTML = '<span id="play-icon">▶</span> Play';
+  btnPlayPause.classList.remove('btn-secondary');
+  btnPlayPause.classList.add('btn-primary');
+  systemStatusEl.className = 'status-badge ready';
+  systemStatusEl.textContent = 'Ready';
+  refVideo.pause();
+  refVideo.currentTime = 0;
+  setFrame(0);
+}
+
 /* Toggle controls and checkboxes listeners */
 function setupUIListeners() {
   btnPlayPause.addEventListener('click', () => {
@@ -893,16 +1146,7 @@ function setupUIListeners() {
   });
 
   btnReset.addEventListener('click', () => {
-    isPlaying = false;
-    playIcon.textContent = '▶';
-    btnPlayPause.innerHTML = '<span id="play-icon">▶</span> Play';
-    btnPlayPause.classList.remove('btn-secondary');
-    btnPlayPause.classList.add('btn-primary');
-    systemStatusEl.className = 'status-badge ready';
-    systemStatusEl.textContent = 'Ready';
-    refVideo.pause();
-    refVideo.currentTime = 0;
-    setFrame(0);
+    resetPlayback();
   });
 
   // Slider scrubbing
@@ -942,6 +1186,92 @@ function setupUIListeners() {
 
   chkMpHelper.addEventListener('change', () => {
     mpSkeletonGroup.visible = chkMpHelper.checked;
+  });
+
+  // Source Video Selector
+  let previousSelectValue = videoSelect.value;
+  videoSelect.addEventListener('change', () => {
+    if (videoSelect.value === 'custom') {
+      videoFileInput.click();
+    } else {
+      previousSelectValue = videoSelect.value;
+      refVideo.src = videoSelect.value;
+      refVideo.load();
+      loadKeypoints();
+      resetPlayback();
+    }
+  });
+
+  videoFileInput.addEventListener('change', async (event) => {
+    const file = event.target.files[0];
+    if (!file) {
+      videoSelect.value = previousSelectValue;
+      return;
+    }
+
+    // Stop current playback
+    isPlaying = false;
+    refVideo.pause();
+    playIcon.textContent = '▶';
+    btnPlayPause.innerHTML = '<span id="play-icon">▶</span> Play';
+    btnPlayPause.classList.remove('btn-secondary');
+    btnPlayPause.classList.add('btn-primary');
+    systemStatusEl.className = 'status-badge ready';
+
+    // Show processing overlay
+    processingOverlay.style.display = 'flex';
+    processingStatus.textContent = 'Initializing MediaPipe Pose Landmarker...';
+    processingProgressFill.style.width = '0%';
+    processingFrameCount.textContent = 'Frame 0 / 0';
+    setStatus('Processing video...');
+
+    try {
+      const extractedKeypoints = await processVideoFile(file, (current, total) => {
+        const pct = Math.round((current / total) * 100);
+        processingProgressFill.style.width = `${pct}%`;
+        processingStatus.textContent = `Analyzing video frames... (${pct}%)`;
+        processingFrameCount.textContent = `Frame ${current} / ${total}`;
+      });
+
+      // Successfully processed!
+      applyKeypointData(extractedKeypoints);
+      
+      // Load video file in preview
+      refVideo.src = URL.createObjectURL(file);
+      refVideo.load();
+
+      // Update dropdown option label or value
+      let customOpt = videoSelect.querySelector('option[value="custom_loaded"]');
+      if (!customOpt) {
+        customOpt = document.createElement('option');
+        customOpt.value = 'custom_loaded';
+        // insert before custom chooser
+        videoSelect.insertBefore(customOpt, videoSelect.options[1]);
+      }
+      customOpt.textContent = `📁 ${file.name} (Processed)`;
+      customOpt.selected = true;
+      previousSelectValue = 'custom_loaded';
+
+      setStatus('Ready');
+      systemStatusEl.className = 'status-badge ready';
+      systemStatusEl.classList.add('ready');
+      videoOverlayStatus.textContent = `${totalFrames} frames processed`;
+    } catch (err) {
+      console.error(err);
+      setStatus(err.message || 'Error processing video.');
+      videoSelect.value = previousSelectValue;
+    } finally {
+      processingOverlay.style.display = 'none';
+      videoFileInput.value = ''; // clear input
+    }
+  });
+
+  btnCancelProcessing.addEventListener('click', () => {
+    shouldCancelProcessing = true;
+    processingOverlay.style.display = 'none';
+    videoSelect.value = previousSelectValue;
+    videoFileInput.value = '';
+    setStatus('Processing cancelled');
   });
 }
 
