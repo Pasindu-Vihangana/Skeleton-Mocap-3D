@@ -2,6 +2,8 @@
 
 A high-performance, premium web dashboard that extracts 3D skeleton joints from video footage using MediaPipe Tasks and maps them in real-time onto a 3D GLTF character model (`dancer.glb`) in a Three.js scene.
 
+![3D Motion Capture Dashboard](public/images/Mocap.png)
+
 ---
 
 ## Architecture Overview
@@ -100,3 +102,11 @@ This generates a production-ready folder in `dist/`.
 - **Speed Multiplier**: Adjust speed from `0.25x` to `2.0x` for slow-motion playback analysis.
 - **Reference Skeleton**: Toggle the purple 3D stick-figure in the viewport to view the raw MediaPipe coordinates side-by-side with the mapped character.
 - **Bone Telemetry Panel**: Inspect real-time Euler angles (`X`, `Y`, `Z` rotations) for all 14 tracked joints as the character dances.
+
+---
+
+## Bone ↔ Keypoint Auto-Alignment Test
+
+The application includes an auto-alignment system to calibrate and align the MediaPipe keypoints with the 3D model skeleton, letting you adjust scale, height offsets, and visualize bones/joint coordinates.
+
+![Auto-Alignment Calibration Panel](public/images/auto-align.png)
